@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
 	portaudio "github.com/gordonklaus/portaudio"
+	"github.com/sashabaranov/go-openai"
 
 	"bytes"
 	"io/ioutil"
@@ -41,16 +43,47 @@ func main() {
 	}
 	fmt.Printf("MP3 file saved as: %s\n", mp3FileName)
 
-	outputDevice, err := findOutputDeviceByName("pipewire")
+	defer os.Remove(mp3FileName)
+
+	transcription, err := transcribeAudio(mp3FileName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
 		os.Exit(1)
+	}
+	fmt.Printf("Transcription: %s\n", transcription)
+
+	// outputDevice, err := findOutputDeviceByName("pipewire")
+	// if err != nil {
+	// 	fmt.Fprintf(os.Stderr, "%v\n", err)
+	// 	os.Exit(1)
+	// }
+
+	// if err := playbackBuffer(recordingBuffer, outputDevice); err != nil {
+	// 	fmt.Fprintf(os.Stderr, "Error during playback: %v\n", err)
+	// 	os.Exit(1)
+	// }
+}
+
+func transcribeAudio(mp3FilePath string) (string, error) {
+	// Initialize OpenAI client
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	client := openai.NewClient(apiKey)
+
+	// Create a request for transcription
+	req := openai.AudioRequest{
+		FilePath:    mp3FilePath,
+		Model:       "whisper-1",
+		Language:    "en",
+		Temperature: 0.5,
 	}
 
-	if err := playbackBuffer(recordingBuffer, outputDevice); err != nil {
-		fmt.Fprintf(os.Stderr, "Error during playback: %v\n", err)
-		os.Exit(1)
+	// Perform the transcription
+	resp, err := client.CreateTranscription(context.Background(), req)
+	if err != nil {
+		return "", fmt.Errorf("Error sending transcription request: %v", err)
 	}
+
+	return resp.Text, nil
 }
 
 func recordAudio() ([]int16, error) {
@@ -74,7 +107,7 @@ func recordAudio() ([]int16, error) {
 	}
 	defer stream.Stop()
 
-	fmt.Println("Press 'Enter' to stop the stream...")
+	fmt.Println("Recording, press 'Enter' to stop...")
 	fmt.Scanln()
 	stream.Stop()
 	fmt.Println("Stream stopped.")
