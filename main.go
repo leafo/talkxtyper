@@ -2,9 +2,16 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"time"
 
 	portaudio "github.com/gordonklaus/portaudio"
+
+	"bytes"
+	"io/ioutil"
+
+	"github.com/viert/go-lame"
 )
 
 const sampleRate = 44100
@@ -26,6 +33,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+
+	mp3FileName, err := writeRecordingToMP3(recordingBuffer)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("MP3 file saved as: %s\n", mp3FileName)
 
 	outputDevice, err := findOutputDeviceByName("pipewire")
 	if err != nil {
@@ -80,6 +94,36 @@ func findOutputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
 		}
 	}
 	return nil, fmt.Errorf("Output device '%s' not found", name)
+}
+
+func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
+	// Convert int16 buffer to byte buffer
+	byteBuffer := new(bytes.Buffer)
+	for _, sample := range recordingBuffer {
+		byteBuffer.WriteByte(byte(sample & 0xff))
+		byteBuffer.WriteByte(byte((sample >> 8) & 0xff))
+	}
+
+	// Initialize LAME encoder
+	// Write to temporary file
+	tempFile, err := ioutil.TempFile("", fmt.Sprintf("talkxtyper-%d-*.mp3", time.Now().Unix()))
+	if err != nil {
+		return "", fmt.Errorf("Error creating temporary file: %v", err)
+	}
+	defer tempFile.Close()
+
+	// Initialize LAME encoder with the output file handle
+	encoder := lame.NewEncoder(tempFile)
+	encoder.SetNumChannels(1)
+	encoder.SetInSamplerate(sampleRate)
+	defer encoder.Close()
+
+	// Encode to MP3
+	if _, err := io.Copy(encoder, byteBuffer); err != nil {
+		return "", fmt.Errorf("Error encoding MP3: %v", err)
+	}
+
+	return tempFile.Name(), nil
 }
 
 func playbackBuffer(recordingBuffer []int16, outputDevice *portaudio.DeviceInfo) error {
