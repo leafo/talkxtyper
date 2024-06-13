@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/go-vgo/robotgo"
 	portaudio "github.com/gordonklaus/portaudio"
 	"github.com/sashabaranov/go-openai"
 
@@ -52,6 +53,11 @@ func main() {
 	}
 	fmt.Printf("Transcription: %s\n", transcription)
 
+	if err := typeString(transcription); err != nil {
+		fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
+		os.Exit(1)
+	}
+
 	// outputDevice, err := findOutputDeviceByName("pipewire")
 	// if err != nil {
 	// 	fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -62,6 +68,11 @@ func main() {
 	// 	fmt.Fprintf(os.Stderr, "Error during playback: %v\n", err)
 	// 	os.Exit(1)
 	// }
+}
+
+func typeString(input string) error {
+	robotgo.TypeStr(input, 0, 16)
+	return nil
 }
 
 func transcribeAudio(mp3FilePath string) (string, error) {
