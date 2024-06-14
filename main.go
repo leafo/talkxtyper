@@ -24,6 +24,13 @@ const maxRecordSeconds = 10
 
 const debug = false
 
+func main() {
+	onExit := func() {
+		fmt.Println("Exiting...")
+	}
+	systray.Run(onReady, onExit)
+}
+
 func onReady() {
 	systray.SetIcon(icon_blue)
 	systray.SetTitle("TalkXTyper")
@@ -50,21 +57,14 @@ func onReady() {
 	}()
 }
 
-func main() {
-	onExit := func() {
-		fmt.Println("Exiting...")
-	}
-
-	systray.Run(onReady, onExit)
-}
-func recordAndTranscribe() (string, error) {
+func recordAndTranscribe(stopCh <-chan struct{}) (string, error) {
 	err := portaudio.Initialize()
 	if err != nil {
 		return "", fmt.Errorf("Error initializing PortAudio: %v", err)
 	}
 	defer portaudio.Terminate()
 
-	recordingBuffer, err := recordAudio()
+	recordingBuffer, err := recordAudio(stopCh)
 	if err != nil {
 		return "", fmt.Errorf("%v", err)
 	}
@@ -121,7 +121,7 @@ func transcribeAudio(mp3FilePath string) (string, error) {
 	return resp.Text, nil
 }
 
-func recordAudio() ([]int16, error) {
+func recordAudio(stopCh <-chan struct{}) ([]int16, error) {
 	var recordingBuffer []int16
 	stream, err := portaudio.OpenDefaultStream(1, 0, sampleRate, bufferSize, func(in []int16) {
 		if debug {
@@ -142,10 +142,12 @@ func recordAudio() ([]int16, error) {
 	}
 	defer stream.Stop()
 
-	fmt.Println("Recording, press 'Enter' to stop...")
-	fmt.Scanln()
-	stream.Stop()
-	fmt.Println("Stream stopped.")
+	fmt.Println("Recording, waiting for stop signal...")
+	select {
+	case <-stopCh:
+		stream.Stop()
+		fmt.Println("Stream stopped.")
+	}
 
 	return recordingBuffer, nil
 }
