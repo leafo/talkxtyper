@@ -1,6 +1,6 @@
 2GOARRAY := 2goarray
 PACKAGE := main
-PNG_FILES := icon_blue.png icon_red.png
+PNG_FILES := icon_blue.png icon_red.png icon_green.png
 
 GO_FILES := $(PNG_FILES:.png=.go)
 
@@ -9,7 +9,7 @@ run:
 	go run *.go
 
 # Default target
-all: $(GO_FILES)
+icons: $(GO_FILES)
 
 # Rule to convert PNG to Go using 2goarray
 %.go: %.png
