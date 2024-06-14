@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	OpenAIKey string
+	OpenAIKey     string
+	IncludeScreen bool
 }
 
 var config Config

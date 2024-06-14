@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"sync/atomic"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -29,12 +29,22 @@ func onReady() {
 	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
 	mAbort.Hide()
 
+	mIncludeScreen := systray.AddMenuItemCheckbox("Include screen", "Analyze the screen to augment the transcription", config.IncludeScreen)
+
 	mReportScreen := systray.AddMenuItem("Report screen", "Snapshot the current screen")
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
 	var stopCh chan struct{}
 
-	var isAborted atomic.Bool
+	var activeContext context.Context
+	var cancel context.CancelFunc
+
+	resetState := func() {
+		systray.SetIcon(icon_blue)
+		mRecord.SetTitle("Record and Transcribe")
+		mAbort.Hide()
+		stopCh = nil
+	}
 
 	go func() {
 		for {
@@ -46,8 +56,14 @@ func onReady() {
 					mAbort.Show()
 
 					stopCh = make(chan struct{})
+
+					activeContext, cancel = context.WithCancel(context.Background())
+
 					go func() {
-						recordingBuffer, err := recordAudio(stopCh)
+						defer resetState()
+
+						recordingBuffer, err := recordAudio(activeContext, stopCh)
+
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "%v\n", err)
 							return
@@ -60,7 +76,7 @@ func onReady() {
 						}
 						defer os.Remove(mp3FileName)
 
-						transcription, err := transcribeAudio(mp3FileName)
+						transcription, err := transcribeAudio(activeContext, mp3FileName)
 						if err != nil {
 							fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
 							return
@@ -73,15 +89,26 @@ func onReady() {
 						stopCh = nil
 					}()
 				} else {
-					close(stopCh)
-					stopCh = nil
-					systray.SetIcon(icon_blue)
-					mRecord.SetTitle("Record and Transcribe")
-					mAbort.Hide()
+					// TODO: this will panic if we've arleady stopped the recording
+					close(stopCh) // trigger the recording to stop
 				}
 
 			case <-mAbort.ClickedCh:
-				isAborted.Store(true)
+				cancel()
+
+			case <-mIncludeScreen.ClickedCh:
+				if mIncludeScreen.Checked() {
+					mIncludeScreen.Uncheck()
+				} else {
+					mIncludeScreen.Check()
+				}
+
+				config.IncludeScreen = mIncludeScreen.Checked()
+
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
+
 			case <-mReportScreen.ClickedCh:
 				path, err := takeScreenshot()
 				if err != nil {

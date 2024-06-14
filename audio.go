@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,7 +17,7 @@ const bufferSize = 256
 const maxRecordSeconds = 10
 const debug = false
 
-func recordAudio(stopCh <-chan struct{}) ([]int16, error) {
+func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	err := portaudio.Initialize()
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing PortAudio: %v", err)
@@ -48,6 +49,9 @@ func recordAudio(stopCh <-chan struct{}) ([]int16, error) {
 	case <-stopCh:
 		stream.Stop()
 		fmt.Println("Recording finished.")
+	case <-ctx.Done():
+		stream.Stop()
+		return nil, fmt.Errorf("Recording cancelled")
 	}
 
 	return recordingBuffer, nil
