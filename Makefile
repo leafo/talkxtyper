@@ -1,8 +1,12 @@
 2GOARRAY := 2goarray
 PACKAGE := main
-PNG_FILES := icon_blue.png
+PNG_FILES := icon_blue.png icon_red.png
 
 GO_FILES := $(PNG_FILES:.png=.go)
+
+# Run the Go program
+run:
+	go run *.go
 
 # Default target
 all: $(GO_FILES)
@@ -15,5 +19,5 @@ all: $(GO_FILES)
 clean:
 	rm -f $(GO_FILES)
 
-.PHONY: all clean
+.PHONY: all clean run
 
