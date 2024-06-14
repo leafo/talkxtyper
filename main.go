@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
 	portaudio "github.com/gordonklaus/portaudio"
 	"github.com/sashabaranov/go-openai"
@@ -23,39 +24,60 @@ const maxRecordSeconds = 10
 
 const debug = false
 
+func onReady() {
+	systray.SetIcon(icon_blue)
+	systray.SetTitle("TalkXTyper")
+	systray.SetTooltip("TalkXTyper")
+
+	mRecord := systray.AddMenuItem("Record and Transcribe", "Start recording and transcribing")
+
+	go func() {
+		for {
+			select {
+			case <-mRecord.ClickedCh:
+				transcription, err := recordAndTranscribe()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%v\n", err)
+					continue
+				}
+				fmt.Printf("Transcription: %s\n", transcription)
+
+				if err := typeString(transcription); err != nil {
+					fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
+				}
+			}
+		}
+	}()
+}
+
 func main() {
+	onExit := func() {
+		fmt.Println("Exiting...")
+	}
+
+	systray.Run(onReady, onExit)
+}
+func recordAndTranscribe() (string, error) {
 	err := portaudio.Initialize()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing PortAudio: %v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("Error initializing PortAudio: %v", err)
 	}
 	defer portaudio.Terminate()
 
 	recordingBuffer, err := recordAudio()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("%v", err)
 	}
 
 	mp3FileName, err := writeRecordingToMP3(recordingBuffer)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("Error writing MP3 file: %v", err)
 	}
-	fmt.Printf("MP3 file saved as: %s\n", mp3FileName)
-
 	defer os.Remove(mp3FileName)
 
 	transcription, err := transcribeAudio(mp3FileName)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Transcription: %s\n", transcription)
-
-	if err := typeString(transcription); err != nil {
-		fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
-		os.Exit(1)
+		return "", fmt.Errorf("Error transcribing audio: %v", err)
 	}
 
 	// outputDevice, err := findOutputDeviceByName("pipewire")
@@ -68,6 +90,8 @@ func main() {
 	// 	fmt.Fprintf(os.Stderr, "Error during playback: %v\n", err)
 	// 	os.Exit(1)
 	// }
+
+	return transcription, nil
 }
 
 func typeString(input string) error {
