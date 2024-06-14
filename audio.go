@@ -18,6 +18,9 @@ const maxRecordSeconds = 10
 const debug = false
 
 func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
+	ctx, cancel := context.WithTimeout(ctx, maxRecordSeconds*time.Second)
+	defer cancel()
+
 	err := portaudio.Initialize()
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing PortAudio: %v", err)

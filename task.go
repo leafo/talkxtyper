@@ -115,6 +115,24 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 	go func() {
 		stateCh <- TaskStateRecording
+
+		descriptionCh := make(chan string, 1)
+
+		if config.IncludeScreen {
+			go func() {
+				defer close(descriptionCh)
+				description, err := describeScreen(t.ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error describing screen: %v\n", err)
+					return
+				}
+				fmt.Fprintf(os.Stderr, "Screen Description: %s\n", description)
+				descriptionCh <- description
+			}()
+		} else {
+			close(descriptionCh)
+		}
+
 		recordingBuffer, err := recordAudio(t.ctx, t.stopRecordingCh)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -131,7 +149,14 @@ func (t *TranscribeTask) Start() chan TaskState {
 		defer os.Remove(mp3FileName)
 
 		stateCh <- TaskStateTranscribing
-		transcription, err := transcribeAudio(t.ctx, mp3FileName)
+
+		fmt.Fprintln(os.Stderr, "Audio ready, waiting for description")
+		var description string
+		for d := range descriptionCh {
+			description = d
+		}
+
+		transcription, err := transcribeAudio(t.ctx, mp3FileName, description)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
 			close(stateCh)

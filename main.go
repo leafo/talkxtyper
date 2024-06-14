@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
 	"golang.design/x/hotkey"
-
-	"io/ioutil"
 )
 
 var DEFAULT_TITLE = "TalkXTyper"
@@ -103,41 +100,4 @@ func onReady() {
 func typeString(input string) error {
 	robotgo.TypeStr(input, 0, 16)
 	return nil
-}
-
-func describeScreen(ctx context.Context) (string, error) {
-	// Take a screenshot
-	path, err := takeScreenshot()
-	if err != nil {
-		return "", fmt.Errorf("Error taking screenshot: %v", err)
-	}
-	defer os.Remove(path)
-
-	// Describe the image
-	description, err := describeImage(ctx, path)
-	if err != nil {
-		return "", fmt.Errorf("Error describing image: %v", err)
-	}
-
-	return description, nil
-}
-
-func takeScreenshot() (string, error) {
-	// Capture the screen
-	image := robotgo.CaptureImg()
-
-	// Create a temporary file
-	tempFile, err := ioutil.TempFile("", fmt.Sprintf("talkxtyper-%d-*.png", time.Now().Unix()))
-	if err != nil {
-		return "", fmt.Errorf("Error creating temporary file: %v", err)
-	}
-	defer tempFile.Close()
-
-	// Save the screenshot to the temporary file
-	err = robotgo.Save(image, tempFile.Name())
-	if err != nil {
-		return "", fmt.Errorf("Error saving screenshot: %v", err)
-	}
-
-	return tempFile.Name(), nil
 }

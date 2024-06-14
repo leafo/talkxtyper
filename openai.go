@@ -21,7 +21,7 @@ func getOpenAIClient() (*openai.Client, error) {
 	return openai.NewClient(apiKey), nil
 }
 
-func transcribeAudio(ctx context.Context, mp3FilePath string) (string, error) {
+func transcribeAudio(ctx context.Context, mp3FilePath string, description string) (string, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
@@ -33,6 +33,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string) (string, error) {
 		Model:       "whisper-1",
 		Language:    "en",
 		Temperature: 0.5,
+		Prompt:      description,
 	}
 
 	// Perform the transcription
