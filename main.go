@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"time"
@@ -13,6 +12,8 @@ import (
 	"io/ioutil"
 )
 
+var DEFAULT_TITLE = "TalkXTyper"
+
 func main() {
 	readConfig()
 	onExit := func() {
@@ -23,8 +24,8 @@ func main() {
 
 func onReady() {
 	systray.SetIcon(icon_blue)
-	systray.SetTitle("TalkXTyper")
-	systray.SetTooltip("TalkXTyper")
+	systray.SetTitle(DEFAULT_TITLE)
+	systray.SetTooltip("Ready")
 
 	mRecord := systray.AddMenuItem("Record and Transcribe", "Start recording and transcribing")
 	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
@@ -35,78 +36,39 @@ func onReady() {
 	mReportScreen := systray.AddMenuItem("Report screen", "Snapshot the current screen")
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
-	var stopCh chan struct{}
-
-	var activeContext context.Context
-	var cancel context.CancelFunc
-
 	// setup hotkeys
 	hk := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
 	hk.Register()
 
-	// clear out the recording task and reset the state
-	resetState := func() {
-		systray.SetIcon(icon_blue)
-		mRecord.SetTitle("Record and Transcribe")
-		mAbort.Hide()
-		stopCh = nil
-	}
-
-	startTask := func() {
-		systray.SetIcon(icon_red)
-		if stopCh == nil {
-			mRecord.SetTitle("Stop recording")
-			mAbort.Show()
-
-			stopCh = make(chan struct{})
-
-			activeContext, cancel = context.WithCancel(context.Background())
-
-			go func() {
-				defer resetState()
-
-				recordingBuffer, err := recordAudio(activeContext, stopCh)
-
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "%v\n", err)
-					return
-				}
-
-				mp3FileName, err := writeRecordingToMP3(recordingBuffer)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
-					return
-				}
-				defer os.Remove(mp3FileName)
-
-				transcription, err := transcribeAudio(activeContext, mp3FileName)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
-					return
-				}
-				fmt.Printf("Transcription: %s\n", transcription)
-
-				if err := typeString(transcription); err != nil {
-					fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
-				}
-				// TODO: this is not thread safe
-				stopCh = nil
-			}()
-		} else {
-			close(stopCh) // warning this will panic if we've arleady stopped the recording
-		}
-	}
-
 	go func() {
 		for {
 			select {
-			case <-hk.Keydown():
-				startTask()
-			case <-mRecord.ClickedCh:
-				startTask()
+			case state := <-taskManager.stateCh:
+				switch state {
+				case TaskStateRecording:
+					systray.SetIcon(icon_red)
+					systray.SetTooltip("Recording audio...")
+					mRecord.SetTitle("Stop recording")
+					mAbort.Show()
+				case TaskStateTranscribing:
+					systray.SetTooltip("Transcribing audio...")
+					systray.SetIcon(icon_green)
+				default:
+					systray.SetTooltip("Ready")
+					systray.SetIcon(icon_blue)
+					mRecord.SetTitle("Record and Transcribe")
+					mAbort.Hide()
+				}
 
+			case transcription := <-taskManager.transcriptionRes:
+				typeString(transcription)
+
+			case <-hk.Keydown():
+				taskManager.StartOrStopTask()
+			case <-mRecord.ClickedCh:
+				taskManager.StartOrStopTask()
 			case <-mAbort.ClickedCh:
-				cancel()
+				taskManager.Abort()
 
 			case <-mIncludeScreen.ClickedCh:
 				if mIncludeScreen.Checked() {
