@@ -46,7 +46,9 @@ func (tm *TaskManager) StartNewTask() {
 
 		tm.stateCh <- TaskStateIdle
 		tm.currentTask.CompareAndSwap(newTask, nil)
-		tm.transcriptionRes <- newTask.result.Load().(string)
+		if result, ok := newTask.result.Load().(string); ok {
+			tm.transcriptionRes <- result
+		}
 	}()
 
 }
