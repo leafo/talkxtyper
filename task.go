@@ -16,7 +16,7 @@ const (
 )
 
 type TaskManager struct {
-	currentTask      atomic.Pointer[Task]
+	currentTask      atomic.Pointer[TranscribeTask]
 	transcriptionRes chan string
 	stateCh          chan TaskState
 }
@@ -24,7 +24,7 @@ type TaskManager struct {
 // task managers ensures only only one task is running at a time and cancels
 // the current task if a new one is started
 var taskManager = TaskManager{
-	currentTask:      atomic.Pointer[Task]{}, // Initialize as nil
+	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
 	transcriptionRes: make(chan string),
 	stateCh:          make(chan TaskState),
 }
@@ -34,7 +34,7 @@ func (tm *TaskManager) StartNewTask() {
 		currentTask.Abort()
 	}
 
-	newTask := NewTask()
+	newTask := NewTranscribeTask()
 	tm.currentTask.Store(newTask)
 
 	stateCh := newTask.Start()
@@ -73,16 +73,16 @@ func (tm *TaskManager) Abort() {
 	}
 }
 
-type Task struct {
+type TranscribeTask struct {
 	stopRecordingCh chan struct{}
 	ctx             context.Context
 	cancel          context.CancelFunc
 	result          atomic.Value // string
 }
 
-func NewTask() *Task {
+func NewTranscribeTask() *TranscribeTask {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Task{
+	return &TranscribeTask{
 		ctx:    ctx,
 		cancel: cancel,
 		result: atomic.Value{},
@@ -90,7 +90,7 @@ func NewTask() *Task {
 }
 
 // stop the recording so that transcription can be started
-func (t *Task) StopRecording() {
+func (t *TranscribeTask) StopRecording() {
 	if t.stopRecordingCh != nil {
 		close(t.stopRecordingCh)
 		t.stopRecordingCh = nil
@@ -98,18 +98,18 @@ func (t *Task) StopRecording() {
 }
 
 // cancel the task, regardless of state
-func (t *Task) Abort() {
+func (t *TranscribeTask) Abort() {
 	t.cancel()
 }
 
-func (t *Task) GetResult() string {
+func (t *TranscribeTask) GetResult() string {
 	if result, ok := t.result.Load().(string); ok {
 		return result
 	}
 	return ""
 }
 
-func (t *Task) Start() chan TaskState {
+func (t *TranscribeTask) Start() chan TaskState {
 	t.stopRecordingCh = make(chan struct{})
 	stateCh := make(chan TaskState)
 
