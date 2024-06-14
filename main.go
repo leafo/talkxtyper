@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -84,21 +85,12 @@ func onReady() {
 				}
 
 			case <-mReportScreen.ClickedCh:
-				path, err := takeScreenshot()
+				description, err := describeScreen(context.Background())
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error taking screenshot: %v\n", err)
+					fmt.Fprintf(os.Stderr, "Error describing screen: %v\n", err)
 					continue
 				}
-				fmt.Printf("Screenshot: %s\n", path)
-
-				defer os.Remove(path)
-
-				transcription, err := describeImage(path)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error describing image: %v\n", err)
-					continue
-				}
-				fmt.Printf("Transcription: %s\n", transcription)
+				fmt.Printf("Description: %s\n", description)
 
 			case <-mExit.ClickedCh:
 				systray.Quit()
@@ -111,6 +103,23 @@ func onReady() {
 func typeString(input string) error {
 	robotgo.TypeStr(input, 0, 16)
 	return nil
+}
+
+func describeScreen(ctx context.Context) (string, error) {
+	// Take a screenshot
+	path, err := takeScreenshot()
+	if err != nil {
+		return "", fmt.Errorf("Error taking screenshot: %v", err)
+	}
+	defer os.Remove(path)
+
+	// Describe the image
+	description, err := describeImage(ctx, path)
+	if err != nil {
+		return "", fmt.Errorf("Error describing image: %v", err)
+	}
+
+	return description, nil
 }
 
 func takeScreenshot() (string, error) {

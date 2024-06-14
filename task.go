@@ -46,11 +46,11 @@ func (tm *TaskManager) StartNewTask() {
 
 		tm.stateCh <- TaskStateIdle
 		tm.currentTask.CompareAndSwap(newTask, nil)
-		if result, ok := newTask.result.Load().(string); ok {
+
+		if result := newTask.GetResult(); result != "" {
 			tm.transcriptionRes <- result
 		}
 	}()
-
 }
 
 func (tm *TaskManager) StartOrStopTask() {
@@ -100,6 +100,13 @@ func (t *Task) StopRecording() {
 // cancel the task, regardless of state
 func (t *Task) Abort() {
 	t.cancel()
+}
+
+func (t *Task) GetResult() string {
+	if result, ok := t.result.Load().(string); ok {
+		return result
+	}
+	return ""
 }
 
 func (t *Task) Start() chan TaskState {

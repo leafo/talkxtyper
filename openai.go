@@ -44,7 +44,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string) (string, error) {
 	return resp.Text, nil
 }
 
-func describeImage(imagePath string) (string, error) {
+func describeImage(ctx context.Context, imagePath string) (string, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
@@ -75,7 +75,7 @@ func describeImage(imagePath string) (string, error) {
 	var messages = []openai.ChatCompletionMessage{
 		openai.ChatCompletionMessage{
 			Role:    "system",
-			Content: "You typing assistent who is reviewing the user's current screen to identify important information and text that may be relevant to a dictation.",
+			Content: "You are a voice to text typing assistant who is collecting text on the user's current screen so that a machine generated transcription can be edited to match any phrases appearing on the screen. Include 1 sentence description of what the user is engaging with. Then list out all relevant keywords/names/words that appear in the provided image so that the transcription may be corrected.",
 		},
 		imageMessage,
 	}
@@ -89,7 +89,7 @@ func describeImage(imagePath string) (string, error) {
 	fmt.Printf("Request: %+v\n", req)
 
 	// Perform the image description
-	resp, err := client.CreateChatCompletion(context.Background(), req)
+	resp, err := client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("Error sending image description request: %v", err)
 	}
