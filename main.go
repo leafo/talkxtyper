@@ -44,6 +44,7 @@ func onReady() {
 	hk := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
 	hk.Register()
 
+	// clear out the recording task and reset the state
 	resetState := func() {
 		systray.SetIcon(icon_blue)
 		mRecord.SetTitle("Record and Transcribe")
@@ -88,11 +89,11 @@ func onReady() {
 				if err := typeString(transcription); err != nil {
 					fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
 				}
+				// TODO: this is not thread safe
 				stopCh = nil
 			}()
 		} else {
-			// TODO: this will panic if we've arleady stopped the recording
-			close(stopCh) // trigger the recording to stop
+			close(stopCh) // warning this will panic if we've arleady stopped the recording
 		}
 	}
 
