@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -10,7 +8,6 @@ import (
 
 	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
-	"github.com/sashabaranov/go-openai"
 
 	"io/ioutil"
 )
@@ -133,91 +130,4 @@ func takeScreenshot() (string, error) {
 	}
 
 	return tempFile.Name(), nil
-}
-
-func getOpenAIClient() (*openai.Client, error) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		apiKey = config.OpenAIKey
-		if apiKey == "" {
-			return nil, fmt.Errorf("OpenAI API key is not set")
-		}
-	}
-	return openai.NewClient(apiKey), nil
-}
-
-func transcribeAudio(mp3FilePath string) (string, error) {
-	client, err := getOpenAIClient()
-	if err != nil {
-		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
-	}
-
-	// Create a request for transcription
-	req := openai.AudioRequest{
-		FilePath:    mp3FilePath,
-		Model:       "whisper-1",
-		Language:    "en",
-		Temperature: 0.5,
-	}
-
-	// Perform the transcription
-	resp, err := client.CreateTranscription(context.Background(), req)
-	if err != nil {
-		return "", fmt.Errorf("Error sending transcription request: %v", err)
-	}
-
-	return resp.Text, nil
-}
-
-func describeImage(imagePath string) (string, error) {
-	client, err := getOpenAIClient()
-	if err != nil {
-		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
-	}
-
-	// Read image file
-	imageData, err := ioutil.ReadFile(imagePath)
-	if err != nil {
-		return "", fmt.Errorf("Error reading image file: %v", err)
-	}
-
-	// Encode image to base64
-	encodedImage := base64.StdEncoding.EncodeToString(imageData)
-	imageDataURL := fmt.Sprintf("data:image/png;base64,%s", encodedImage)
-
-	var imageMessage = openai.ChatCompletionMessage{
-		Role: "user",
-		MultiContent: []openai.ChatMessagePart{
-			{
-				Type: openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{
-					URL: imageDataURL,
-				},
-			},
-		},
-	}
-
-	var messages = []openai.ChatCompletionMessage{
-		openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: "You typing assistent who is reviewing the user's current screen to identify important information and text that may be relevant to a dictation.",
-		},
-		imageMessage,
-	}
-
-	// Create a request for image description
-	req := openai.ChatCompletionRequest{
-		Model:    "gpt-4o",
-		Messages: messages,
-	}
-
-	fmt.Printf("Request: %+v\n", req)
-
-	// Perform the image description
-	resp, err := client.CreateChatCompletion(context.Background(), req)
-	if err != nil {
-		return "", fmt.Errorf("Error sending image description request: %v", err)
-	}
-
-	return resp.Choices[0].Message.Content, nil
 }
