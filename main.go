@@ -2,29 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
-	"io"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
-	portaudio "github.com/gordonklaus/portaudio"
 	"github.com/sashabaranov/go-openai"
 
-	"bytes"
 	"io/ioutil"
-
-	"github.com/viert/go-lame"
 )
 
-const sampleRate = 44100
-const bufferSize = 256
-const maxRecordSeconds = 10
-
-const debug = false
-
 func main() {
+	readConfig()
 	onExit := func() {
 		fmt.Println("Exiting...")
 	}
@@ -37,61 +29,85 @@ func onReady() {
 	systray.SetTooltip("TalkXTyper")
 
 	mRecord := systray.AddMenuItem("Record and Transcribe", "Start recording and transcribing")
+	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
+	mAbort.Hide()
+
+	mReportScreen := systray.AddMenuItem("Report screen", "Snapshot the current screen")
+	mExit := systray.AddMenuItem("Exit", "Exit the application")
+
+	var stopCh chan struct{}
+
+	var isAborted atomic.Bool
 
 	go func() {
 		for {
 			select {
 			case <-mRecord.ClickedCh:
-				transcription, err := recordAndTranscribe()
+				systray.SetIcon(icon_red)
+				if stopCh == nil {
+					mRecord.SetTitle("Stop recording")
+					mAbort.Show()
+
+					stopCh = make(chan struct{})
+					go func() {
+						recordingBuffer, err := recordAudio(stopCh)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "%v\n", err)
+							return
+						}
+
+						mp3FileName, err := writeRecordingToMP3(recordingBuffer)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
+							return
+						}
+						defer os.Remove(mp3FileName)
+
+						transcription, err := transcribeAudio(mp3FileName)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
+							return
+						}
+						fmt.Printf("Transcription: %s\n", transcription)
+
+						if err := typeString(transcription); err != nil {
+							fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
+						}
+						stopCh = nil
+					}()
+				} else {
+					close(stopCh)
+					stopCh = nil
+					systray.SetIcon(icon_blue)
+					mRecord.SetTitle("Record and Transcribe")
+					mAbort.Hide()
+				}
+
+			case <-mAbort.ClickedCh:
+				isAborted.Store(true)
+			case <-mReportScreen.ClickedCh:
+				path, err := takeScreenshot()
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "%v\n", err)
+					fmt.Fprintf(os.Stderr, "Error taking screenshot: %v\n", err)
+					continue
+				}
+				fmt.Printf("Screenshot: %s\n", path)
+
+				defer os.Remove(path)
+
+				transcription, err := describeImage(path)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error describing image: %v\n", err)
 					continue
 				}
 				fmt.Printf("Transcription: %s\n", transcription)
 
-				if err := typeString(transcription); err != nil {
-					fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
-				}
+			case <-mExit.ClickedCh:
+				systray.Quit()
+
 			}
 		}
 	}()
-}
-
-func recordAndTranscribe(stopCh <-chan struct{}) (string, error) {
-	err := portaudio.Initialize()
-	if err != nil {
-		return "", fmt.Errorf("Error initializing PortAudio: %v", err)
-	}
-	defer portaudio.Terminate()
-
-	recordingBuffer, err := recordAudio(stopCh)
-	if err != nil {
-		return "", fmt.Errorf("%v", err)
-	}
-
-	mp3FileName, err := writeRecordingToMP3(recordingBuffer)
-	if err != nil {
-		return "", fmt.Errorf("Error writing MP3 file: %v", err)
-	}
-	defer os.Remove(mp3FileName)
-
-	transcription, err := transcribeAudio(mp3FileName)
-	if err != nil {
-		return "", fmt.Errorf("Error transcribing audio: %v", err)
-	}
-
-	// outputDevice, err := findOutputDeviceByName("pipewire")
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "%v\n", err)
-	// 	os.Exit(1)
-	// }
-
-	// if err := playbackBuffer(recordingBuffer, outputDevice); err != nil {
-	// 	fmt.Fprintf(os.Stderr, "Error during playback: %v\n", err)
-	// 	os.Exit(1)
-	// }
-
-	return transcription, nil
 }
 
 func typeString(input string) error {
@@ -99,10 +115,42 @@ func typeString(input string) error {
 	return nil
 }
 
-func transcribeAudio(mp3FilePath string) (string, error) {
-	// Initialize OpenAI client
+func takeScreenshot() (string, error) {
+	// Capture the screen
+	image := robotgo.CaptureImg()
+
+	// Create a temporary file
+	tempFile, err := ioutil.TempFile("", fmt.Sprintf("talkxtyper-%d-*.png", time.Now().Unix()))
+	if err != nil {
+		return "", fmt.Errorf("Error creating temporary file: %v", err)
+	}
+	defer tempFile.Close()
+
+	// Save the screenshot to the temporary file
+	err = robotgo.Save(image, tempFile.Name())
+	if err != nil {
+		return "", fmt.Errorf("Error saving screenshot: %v", err)
+	}
+
+	return tempFile.Name(), nil
+}
+
+func getOpenAIClient() (*openai.Client, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	client := openai.NewClient(apiKey)
+	if apiKey == "" {
+		apiKey = config.OpenAIKey
+		if apiKey == "" {
+			return nil, fmt.Errorf("OpenAI API key is not set")
+		}
+	}
+	return openai.NewClient(apiKey), nil
+}
+
+func transcribeAudio(mp3FilePath string) (string, error) {
+	client, err := getOpenAIClient()
+	if err != nil {
+		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
+	}
 
 	// Create a request for transcription
 	req := openai.AudioRequest{
@@ -121,131 +169,55 @@ func transcribeAudio(mp3FilePath string) (string, error) {
 	return resp.Text, nil
 }
 
-func recordAudio(stopCh <-chan struct{}) ([]int16, error) {
-	var recordingBuffer []int16
-	stream, err := portaudio.OpenDefaultStream(1, 0, sampleRate, bufferSize, func(in []int16) {
-		if debug {
-			fmt.Printf("Chunk length: %d\n", len(in))
-			fmt.Printf("Input chunk: %+v\n", in)
-		}
-
-		recordingBuffer = append(recordingBuffer, in...)
-	})
-
+func describeImage(imagePath string) (string, error) {
+	client, err := getOpenAIClient()
 	if err != nil {
-		return nil, fmt.Errorf("Error opening default stream: %v", err)
-	}
-	defer stream.Close()
-
-	if err := stream.Start(); err != nil {
-		return nil, fmt.Errorf("Error starting stream: %v", err)
-	}
-	defer stream.Stop()
-
-	fmt.Println("Recording, waiting for stop signal...")
-	select {
-	case <-stopCh:
-		stream.Stop()
-		fmt.Println("Stream stopped.")
+		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
-	return recordingBuffer, nil
-}
-
-func findOutputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
-	devices, err := portaudio.Devices()
+	// Read image file
+	imageData, err := ioutil.ReadFile(imagePath)
 	if err != nil {
-		return nil, fmt.Errorf("Error listing devices: %v", err)
+		return "", fmt.Errorf("Error reading image file: %v", err)
 	}
 
-	for _, device := range devices {
-		if device.Name == name && device.MaxOutputChannels > 0 {
-			return device, nil
-		}
-	}
-	return nil, fmt.Errorf("Output device '%s' not found", name)
-}
+	// Encode image to base64
+	encodedImage := base64.StdEncoding.EncodeToString(imageData)
+	imageDataURL := fmt.Sprintf("data:image/png;base64,%s", encodedImage)
 
-func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
-	// Convert int16 buffer to byte buffer
-	byteBuffer := new(bytes.Buffer)
-	for _, sample := range recordingBuffer {
-		byteBuffer.WriteByte(byte(sample & 0xff))
-		byteBuffer.WriteByte(byte((sample >> 8) & 0xff))
-	}
-
-	// Initialize LAME encoder
-	// Write to temporary file
-	tempFile, err := ioutil.TempFile("", fmt.Sprintf("talkxtyper-%d-*.mp3", time.Now().Unix()))
-	if err != nil {
-		return "", fmt.Errorf("Error creating temporary file: %v", err)
-	}
-	defer tempFile.Close()
-
-	// Initialize LAME encoder with the output file handle
-	encoder := lame.NewEncoder(tempFile)
-	encoder.SetNumChannels(1)
-	encoder.SetInSamplerate(sampleRate)
-	defer encoder.Close()
-
-	// Encode to MP3
-	if _, err := io.Copy(encoder, byteBuffer); err != nil {
-		return "", fmt.Errorf("Error encoding MP3: %v", err)
-	}
-
-	return tempFile.Name(), nil
-}
-
-func playbackBuffer(recordingBuffer []int16, outputDevice *portaudio.DeviceInfo) error {
-	// play back the recording using portaudio, 44100 Hz, 16 bit signed mono audio
-	playbackStream, err := portaudio.OpenStream(portaudio.StreamParameters{
-		Output: portaudio.StreamDeviceParameters{
-			Device:   outputDevice,
-			Channels: 1,
-			Latency:  outputDevice.DefaultLowOutputLatency,
+	var imageMessage = openai.ChatCompletionMessage{
+		Role: "user",
+		MultiContent: []openai.ChatMessagePart{
+			{
+				Type: openai.ChatMessagePartTypeImageURL,
+				ImageURL: &openai.ChatMessageImageURL{
+					URL: imageDataURL,
+				},
+			},
 		},
-		SampleRate:      sampleRate,
-		FramesPerBuffer: bufferSize,
-	}, func(out []int16) {
-		for i := range out {
-			if len(recordingBuffer) > 0 {
-				out[i] = recordingBuffer[0]
-				recordingBuffer = recordingBuffer[1:]
-			} else {
-				out[i] = 0
-			}
-		}
-	})
+	}
 
+	var messages = []openai.ChatCompletionMessage{
+		openai.ChatCompletionMessage{
+			Role:    "system",
+			Content: "You typing assistent who is reviewing the user's current screen to identify important information and text that may be relevant to a dictation.",
+		},
+		imageMessage,
+	}
+
+	// Create a request for image description
+	req := openai.ChatCompletionRequest{
+		Model:    "gpt-4o",
+		Messages: messages,
+	}
+
+	fmt.Printf("Request: %+v\n", req)
+
+	// Perform the image description
+	resp, err := client.CreateChatCompletion(context.Background(), req)
 	if err != nil {
-		return fmt.Errorf("Error opening playback stream: %v", err)
-	}
-	defer playbackStream.Close()
-
-	if debug {
-		fmt.Printf("Playback stream: %+v\n", playbackStream)
+		return "", fmt.Errorf("Error sending image description request: %v", err)
 	}
 
-	if err := playbackStream.Start(); err != nil {
-		return fmt.Errorf("Error starting playback stream: %v", err)
-	}
-	defer playbackStream.Stop()
-
-	stop := make(chan struct{})
-	go func() {
-		fmt.Println("Playing (press 'Enter' to stop)...")
-		fmt.Scanln()
-		close(stop)
-	}()
-
-	for len(recordingBuffer) > 0 {
-		select {
-		case <-stop:
-			return nil
-		default:
-			// continue playback
-		}
-	}
-
-	return nil
+	return resp.Choices[0].Message.Content, nil
 }
