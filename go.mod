@@ -35,6 +35,7 @@ require (
 	github.com/vcaesar/tt v0.20.0 // indirect
 	github.com/viert/go-lame v0.0.0-20201108052322-bb552596b11d // indirect
 	github.com/yusufpapurcu/wmi v1.2.3 // indirect
+	golang.design/x/hotkey v0.4.1 // indirect
 	golang.org/x/image v0.12.0 // indirect
 	golang.org/x/sys v0.12.0 // indirect
 )

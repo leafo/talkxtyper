@@ -8,6 +8,7 @@ import (
 
 	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
+	"golang.design/x/hotkey"
 
 	"io/ioutil"
 )
@@ -39,6 +40,10 @@ func onReady() {
 	var activeContext context.Context
 	var cancel context.CancelFunc
 
+	// setup hotkeys
+	hk := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
+	hk.Register()
+
 	resetState := func() {
 		systray.SetIcon(icon_blue)
 		mRecord.SetTitle("Record and Transcribe")
@@ -46,52 +51,58 @@ func onReady() {
 		stopCh = nil
 	}
 
+	startTask := func() {
+		systray.SetIcon(icon_red)
+		if stopCh == nil {
+			mRecord.SetTitle("Stop recording")
+			mAbort.Show()
+
+			stopCh = make(chan struct{})
+
+			activeContext, cancel = context.WithCancel(context.Background())
+
+			go func() {
+				defer resetState()
+
+				recordingBuffer, err := recordAudio(activeContext, stopCh)
+
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%v\n", err)
+					return
+				}
+
+				mp3FileName, err := writeRecordingToMP3(recordingBuffer)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
+					return
+				}
+				defer os.Remove(mp3FileName)
+
+				transcription, err := transcribeAudio(activeContext, mp3FileName)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
+					return
+				}
+				fmt.Printf("Transcription: %s\n", transcription)
+
+				if err := typeString(transcription); err != nil {
+					fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
+				}
+				stopCh = nil
+			}()
+		} else {
+			// TODO: this will panic if we've arleady stopped the recording
+			close(stopCh) // trigger the recording to stop
+		}
+	}
+
 	go func() {
 		for {
 			select {
+			case <-hk.Keydown():
+				startTask()
 			case <-mRecord.ClickedCh:
-				systray.SetIcon(icon_red)
-				if stopCh == nil {
-					mRecord.SetTitle("Stop recording")
-					mAbort.Show()
-
-					stopCh = make(chan struct{})
-
-					activeContext, cancel = context.WithCancel(context.Background())
-
-					go func() {
-						defer resetState()
-
-						recordingBuffer, err := recordAudio(activeContext, stopCh)
-
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "%v\n", err)
-							return
-						}
-
-						mp3FileName, err := writeRecordingToMP3(recordingBuffer)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
-							return
-						}
-						defer os.Remove(mp3FileName)
-
-						transcription, err := transcribeAudio(activeContext, mp3FileName)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
-							return
-						}
-						fmt.Printf("Transcription: %s\n", transcription)
-
-						if err := typeString(transcription); err != nil {
-							fmt.Fprintf(os.Stderr, "Error typing transcription: %v\n", err)
-						}
-						stopCh = nil
-					}()
-				} else {
-					// TODO: this will panic if we've arleady stopped the recording
-					close(stopCh) // trigger the recording to stop
-				}
+				startTask()
 
 			case <-mAbort.ClickedCh:
 				cancel()
