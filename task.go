@@ -127,6 +127,8 @@ func (t *TranscribeTask) Start() chan TaskState {
 					return
 				}
 				fmt.Fprintf(os.Stderr, "Screen Description: %s\n", description)
+
+				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
 				descriptionCh <- description
 			}()
 		} else {

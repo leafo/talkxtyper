@@ -98,6 +98,6 @@ func onReady() {
 }
 
 func typeString(input string) error {
-	robotgo.TypeStr(input, 0, 16)
+	robotgo.TypeStr(input, 0, 2)
 	return nil
 }
