@@ -14,7 +14,7 @@ import (
 
 const sampleRate = 44100
 const bufferSize = 256
-const maxRecordSeconds = 10
+const maxRecordSeconds = 30
 const debug = false
 
 func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
