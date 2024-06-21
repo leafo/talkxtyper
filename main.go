@@ -13,6 +13,14 @@ import (
 var DEFAULT_TITLE = "TalkXTyper"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--help" {
+		fmt.Println("Usage: talkxtyper [options]")
+		fmt.Println("Starts the TalkXTyper application in the system tray.")
+		fmt.Println("Options:")
+		fmt.Println("  --help        Show this help message")
+		return
+	}
+
 	readConfig()
 	onExit := func() {
 		fmt.Println("Exiting...")
