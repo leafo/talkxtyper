@@ -22,6 +22,11 @@ func main() {
 	}
 
 	readConfig()
+
+	if config.ListenAddress != "" {
+		go startServer()
+	}
+
 	onExit := func() {
 		fmt.Println("Exiting...")
 	}

@@ -11,6 +11,7 @@ import (
 type Config struct {
 	OpenAIKey     string
 	IncludeScreen bool
+	ListenAddress string
 }
 
 var config Config

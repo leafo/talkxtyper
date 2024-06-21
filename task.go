@@ -19,6 +19,7 @@ type TaskManager struct {
 	currentTask      atomic.Pointer[TranscribeTask]
 	transcriptionRes chan string
 	stateCh          chan TaskState
+	context          atomic.Value // string
 }
 
 // task managers ensures only only one task is running at a time and cancels
@@ -172,3 +173,15 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 	return stateCh
 }
+
+func (tm *TaskManager) GetContext() string {
+	if context, ok := tm.context.Load().(string); ok {
+		return context
+	}
+	return ""
+}
+
+func (tm *TaskManager) SetContext(ctx string) {
+	tm.context.Store(ctx)
+}
+
