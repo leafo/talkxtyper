@@ -22,7 +22,8 @@ func getOpenAIClient() (*openai.Client, error) {
 	return openai.NewClient(apiKey), nil
 }
 
-func transcribeAudio(ctx context.Context, mp3FilePath string, description string) (string, error) {
+// in my testing the Prompt parameter is not very good at repairing the transcription, so we do a two pass process instead
+func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (string, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
@@ -34,7 +35,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, description string
 		Model:       "whisper-1",
 		Language:    "en",
 		Temperature: 0.5,
-		Prompt:      description,
+		// Prompt:      instructions,
 	}
 
 	// Perform the transcription
@@ -43,7 +44,52 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, description string
 		return "", fmt.Errorf("Error sending transcription request: %v", err)
 	}
 
+	if instructions != "" {
+		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
+		if err != nil {
+			return "", fmt.Errorf("Error fixing transcription: %v", err)
+		}
+		return fixedText, nil
+	}
+
 	return resp.Text, nil
+}
+
+func fixTranscription(ctx context.Context, transcribedText string, instructions string) (string, error) {
+	client, err := getOpenAIClient()
+	if err != nil {
+		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
+	}
+
+	var messages = []openai.ChatCompletionMessage{
+		{
+			Role:    "system",
+			Content: "You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type. You will output only the updated transcription and no other text.",
+		},
+		{
+			Role:    "user",
+			Content: instructions,
+		},
+		{
+			Role:    "user",
+			Content: fmt.Sprintf("Transcription: %s", transcribedText),
+		},
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model:     "gpt-4o",
+		Messages:  messages,
+		MaxTokens: 1024,
+	}
+
+	log.Printf("ChatCompletion for fixing transcription: %+v\n", req)
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("Error sending transcription fix request: %v", err)
+	}
+
+	return resp.Choices[0].Message.Content, nil
 }
 
 func describeImage(ctx context.Context, imagePath string) (string, error) {
@@ -88,7 +134,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 		Messages: messages,
 	}
 
-	log.Printf("Request: %+v\n", req)
+	log.Printf("ChatCompletion: %+v\n", req)
 
 	// Perform the image description
 	resp, err := client.CreateChatCompletion(ctx, req)
