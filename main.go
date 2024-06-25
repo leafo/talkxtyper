@@ -20,6 +20,7 @@ func main() {
 	help := flag.Bool("help", false, "Show this help message")
 	nvimTest := flag.Bool("nvim-test", false, "Test nvim integration")
 	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
+	reportScreen := flag.Bool("report-screen", false, "Test screen description system, and exit")
 	flag.Parse()
 
 	if *help {
@@ -52,6 +53,15 @@ func main() {
 
 	if *oneShot {
 		oneShotMode()
+		return
+	}
+
+	if *reportScreen {
+		description, err := describeScreen(context.Background())
+		if err != nil {
+			log.Fatalf("Error describing screen: %v", err)
+		}
+		log.Printf("Description: %s", description)
 		return
 	}
 
@@ -98,12 +108,14 @@ func onReady() {
 
 	mIncludeScreen := systray.AddMenuItemCheckbox("Include screen", "Analyze the screen to augment the transcription", config.IncludeScreen)
 
-	mReportScreen := systray.AddMenuItem("Report screen", "Snapshot the current screen")
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
 	// setup hotkeys
-	hk := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
-	hk.Register()
+	listen1 := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
+	listen1.Register()
+
+	listen2 := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
+	listen2.Register()
 
 	go func() {
 		for {
@@ -128,8 +140,12 @@ func onReady() {
 			case transcription := <-taskManager.transcriptionRes:
 				typeString(transcription)
 
-			case <-hk.Keydown():
+			case <-listen1.Keydown():
 				taskManager.StartOrStopTask()
+
+			case <-listen2.Keydown():
+				taskManager.Abort()
+
 			case <-mRecord.ClickedCh:
 				taskManager.StartOrStopTask()
 			case <-mAbort.ClickedCh:
@@ -147,14 +163,6 @@ func onReady() {
 				if err := writeConfig(); err != nil {
 					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
 				}
-
-			case <-mReportScreen.ClickedCh:
-				description, err := describeScreen(context.Background())
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error describing screen: %v\n", err)
-					continue
-				}
-				fmt.Printf("Description: %s\n", description)
 
 			case <-mExit.ClickedCh:
 				systray.Quit()
