@@ -11,10 +11,15 @@ import (
 type Config struct {
 	OpenAIKey     string
 	IncludeScreen bool
+	IncludeNvim   bool
 	ListenAddress string
 }
 
-var config Config
+var config = Config{
+	// ListenAddress: "localhost:9898",
+	// IncludeScreen: true,
+	IncludeNvim: true,
+}
 
 func getConfigPath() (string, error) {
 	configDir, err := os.UserConfigDir()
