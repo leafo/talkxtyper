@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 
 	"github.com/sashabaranov/go-openai"
@@ -87,7 +88,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 		Messages: messages,
 	}
 
-	fmt.Printf("Request: %+v\n", req)
+	log.Printf("Request: %+v\n", req)
 
 	// Perform the image description
 	resp, err := client.CreateChatCompletion(ctx, req)

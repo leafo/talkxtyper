@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sync/atomic"
 )
@@ -20,6 +21,7 @@ type TaskManager struct {
 	transcriptionRes chan string
 	stateCh          chan TaskState
 	context          atomic.Value // string
+	history          []string     // history of transcriptions
 }
 
 // task managers ensures only only one task is running at a time and cancels
@@ -27,7 +29,7 @@ type TaskManager struct {
 var taskManager = TaskManager{
 	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
 	transcriptionRes: make(chan string),
-	stateCh:          make(chan TaskState),
+	stateCh:          make(chan TaskState, 10),
 }
 
 func (tm *TaskManager) StartNewTask() {
@@ -124,10 +126,10 @@ func (t *TranscribeTask) Start() chan TaskState {
 				defer close(descriptionCh)
 				description, err := describeScreen(t.ctx)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Error describing screen: %v\n", err)
+					log.Printf("Error describing screen: %v\n", err)
 					return
 				}
-				fmt.Fprintf(os.Stderr, "Screen Description: %s\n", description)
+				log.Printf("Screen Description: %s\n", description)
 
 				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
 				descriptionCh <- description
@@ -138,14 +140,14 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		recordingBuffer, err := recordAudio(t.ctx, t.stopRecordingCh)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
+			log.Printf("%v\n", err)
 			close(stateCh)
 			return
 		}
 
 		mp3FileName, err := writeRecordingToMP3(recordingBuffer)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing MP3 file: %v\n", err)
+			log.Printf("Error writing MP3 file: %v\n", err)
 			close(stateCh)
 			return
 		}
@@ -153,7 +155,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		stateCh <- TaskStateTranscribing
 
-		fmt.Fprintln(os.Stderr, "Audio ready, waiting for description")
+		log.Println("Audio ready, waiting for description")
 		var description string
 		for d := range descriptionCh {
 			description = d
@@ -161,11 +163,11 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		transcription, err := transcribeAudio(t.ctx, mp3FileName, description)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error transcribing audio: %v\n", err)
+			log.Printf("Error transcribing audio: %v\n", err)
 			close(stateCh)
 			return
 		}
-		fmt.Printf("Transcription: %s\n", transcription)
+		log.Printf("Transcription: %s\n", transcription)
 
 		t.result.Store(transcription)
 		close(stateCh)
@@ -185,3 +187,6 @@ func (tm *TaskManager) SetContext(ctx string) {
 	tm.context.Store(ctx)
 }
 
+func (tm *TaskManager) AppendToHistory(entry string) {
+	tm.history = append(tm.history, entry)
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"time"
 
 	portaudio "github.com/gordonklaus/portaudio"
@@ -30,8 +31,8 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	var recordingBuffer []int16
 	stream, err := portaudio.OpenDefaultStream(1, 0, sampleRate, bufferSize, func(in []int16) {
 		if debug {
-			fmt.Printf("Chunk length: %d\n", len(in))
-			fmt.Printf("Input chunk: %+v\n", in)
+			log.Printf("Chunk length: %d\n", len(in))
+			log.Printf("Input chunk: %+v\n", in)
 		}
 
 		recordingBuffer = append(recordingBuffer, in...)
@@ -47,11 +48,11 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	}
 	defer stream.Stop()
 
-	fmt.Println("Recording, waiting for stop signal...")
+	log.Println("Recording, waiting for stop signal...")
 	select {
 	case <-stopCh:
 		stream.Stop()
-		fmt.Println("Recording finished.")
+		log.Println("Recording finished.")
 	case <-ctx.Done():
 		stream.Stop()
 		return nil, fmt.Errorf("Recording cancelled")
@@ -145,7 +146,7 @@ func playRecordingToDevice(recordingBuffer []int16, outputDevice *portaudio.Devi
 	defer playbackStream.Close()
 
 	if debug {
-		fmt.Printf("Playback stream: %+v\n", playbackStream)
+		log.Printf("Playback stream: %+v\n", playbackStream)
 	}
 
 	if err := playbackStream.Start(); err != nil {

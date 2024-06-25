@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"os/signal"
 
 	"flag"
 
@@ -17,6 +19,7 @@ var DEFAULT_TITLE = "TalkXTyper"
 func main() {
 	help := flag.Bool("help", false, "Show this help message")
 	nvimTest := flag.Bool("nvim-test", false, "Test nvim integration")
+	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
 	flag.Parse()
 
 	if *help {
@@ -47,14 +50,41 @@ func main() {
 
 	readConfig()
 
+	if *oneShot {
+		oneShotMode()
+		return
+	}
+
 	if config.ListenAddress != "" {
 		go startServer()
 	}
 
 	onExit := func() {
-		fmt.Println("Exiting...")
+		log.Println("Exiting...")
 	}
+	// note this takes over the main loop
 	systray.Run(onReady, onExit)
+}
+
+func oneShotMode() {
+	log.Println("Now recording... (Press Ctrl+C to stop)")
+	taskManager.StartOrStopTask()
+
+	// Listen for CTRL-C to stop the task
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+
+	log.Println("Stopping recording...")
+	taskManager.StopRecording()
+
+	log.Println("Waiting for transcription...")
+	select {
+	case transcription := <-taskManager.transcriptionRes:
+		fmt.Println(transcription)
+	case <-c:
+		log.Println("CTRL-C received")
+	}
 }
 
 func onReady() {
