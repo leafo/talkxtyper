@@ -22,6 +22,7 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 			<li><a href="/stop-recording">Stop Recording</a></li>
 			<li><a href="/abort-recording">Abort Recording</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
+			<li><a href="/nvim">Show nvim context</a></li>
 		</ul>
 	</body>
 	</html>
@@ -42,6 +43,38 @@ var contextPageTemplate = template.Must(template.New("context").Parse(`
 			<textarea id="context" name="context" rows="4" cols="50"></textarea><br><br>
 			<input type="submit" value="Submit">
 		</form>
+	</body>
+	</html>
+`))
+
+var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>nvim Context</title>
+	</head>
+	<body>
+		<h1>nvim Context</h1>
+		<form>
+			<label for="command">Enter Command:</label><br>
+			<textarea id="command" name="command" style="min-height: 100px;">{{.Command}}</textarea><br><br>
+			<input type="submit" value="Submit">
+		</form>
+
+		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
+
+		<pre>{{.Context}}</pre>
+		<script>
+			(function() {
+				function refreshPage() {
+					if (!document.activeElement || (document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT")) {
+						location.reload();
+					}
+				}
+				setInterval(refreshPage, 1000);
+			})();
+		</script>
+
 	</body>
 	</html>
 `))
@@ -111,6 +144,36 @@ func startServer() {
 		}
 
 		fmt.Fprintf(w, "Screen description: %s", description)
+	}))
+
+	http.HandleFunc("/nvim", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		command := r.URL.Query().Get("command")
+
+		nvimClient := NewNvimClient()
+		err := nvimClient.FindFirstNvim()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Error finding active nvim instance: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		var nvimContext string
+		var nvimError error
+
+		if command != "" {
+			nvimContext, nvimError = nvimClient.RemoteExecute(command)
+		} else {
+			nvimContext, nvimError = nvimClient.GetVisibleText("<<CURSOR>>")
+		}
+
+		err = nvimPageTemplate.Execute(w, map[string]interface{}{
+			"Command": command,
+			"Context": nvimContext,
+			"Error":   nvimError,
+		})
+
+		if err != nil {
+			http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		}
 	}))
 
 	fmt.Printf("Server is starting on %s\n", config.ListenAddress)
