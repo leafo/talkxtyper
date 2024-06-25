@@ -19,5 +19,9 @@ icons: $(GO_FILES)
 clean:
 	rm -f $(GO_FILES)
 
+install:
+	go install ./...
+
+
 .PHONY: all clean run
 

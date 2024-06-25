@@ -24,11 +24,7 @@ func main() {
 	flag.Parse()
 
 	if *help {
-		fmt.Println("Usage: talkxtyper [options]")
-		fmt.Printf("Starts the %s application in the system tray.\n", DEFAULT_TITLE)
-		fmt.Println("Options:")
-		fmt.Println("  --help        Show this help message")
-		fmt.Println("  --nvim-test   Test nvim integration")
+		flag.Usage()
 		return
 	}
 
