@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -192,7 +193,11 @@ func (t *TranscribeTask) Start() chan TaskState {
 			close(stateCh)
 			return
 		}
-		log.Printf("Transcription: %s\n", transcription)
+
+		transcriptionJSON, err := json.Marshal(transcription)
+		if err == nil {
+			log.Printf("Transcription: %s\n", transcriptionJSON)
+		}
 
 		t.result.Store(transcription)
 		close(stateCh)
