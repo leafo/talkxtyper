@@ -18,7 +18,7 @@ const (
 
 type TaskManager struct {
 	currentTask      atomic.Pointer[TranscribeTask]
-	transcriptionRes chan string
+	transcriptionRes chan TranscriptionResult
 	stateCh          chan TaskState
 	context          atomic.Value // string
 	history          []string     // history of transcriptions
@@ -28,7 +28,7 @@ type TaskManager struct {
 // the current task if a new one is started
 var taskManager = TaskManager{
 	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
-	transcriptionRes: make(chan string),
+	transcriptionRes: make(chan TranscriptionResult),
 	stateCh:          make(chan TaskState, 10),
 }
 
@@ -50,7 +50,7 @@ func (tm *TaskManager) StartNewTask() {
 		tm.stateCh <- TaskStateIdle
 		tm.currentTask.CompareAndSwap(newTask, nil)
 
-		if result := newTask.GetResult(); result != "" {
+		if result := newTask.GetResult(); !result.IsEmpty() {
 			tm.transcriptionRes <- result
 		}
 	}()
@@ -80,7 +80,7 @@ type TranscribeTask struct {
 	stopRecordingCh chan struct{}
 	ctx             context.Context
 	cancel          context.CancelFunc
-	result          atomic.Value // string
+	result          atomic.Value // TranscriptionResult
 }
 
 func NewTranscribeTask() *TranscribeTask {
@@ -105,11 +105,11 @@ func (t *TranscribeTask) Abort() {
 	t.cancel()
 }
 
-func (t *TranscribeTask) GetResult() string {
-	if result, ok := t.result.Load().(string); ok {
+func (t *TranscribeTask) GetResult() TranscriptionResult {
+	if result, ok := t.result.Load().(TranscriptionResult); ok {
 		return result
 	}
-	return ""
+	return TranscriptionResult{}
 }
 
 func (t *TranscribeTask) Start() chan TaskState {

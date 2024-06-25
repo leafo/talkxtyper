@@ -18,7 +18,7 @@ type Config struct {
 var config = Config{
 	// ListenAddress: "localhost:9898",
 	// IncludeScreen: true,
-	IncludeNvim: true,
+	// IncludeNvim: true,
 }
 
 func getConfigPath() (string, error) {

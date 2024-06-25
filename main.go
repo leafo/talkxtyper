@@ -138,7 +138,7 @@ func onReady() {
 				}
 
 			case transcription := <-taskManager.transcriptionRes:
-				typeString(transcription)
+				typeString(transcription.String())
 
 			case <-listen1.Keydown():
 				taskManager.StartOrStopTask()

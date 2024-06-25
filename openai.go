@@ -5,11 +5,26 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 
 	"github.com/sashabaranov/go-openai"
 )
+
+type TranscriptionResult struct {
+	Original string
+	Modified string
+}
+
+func (tr *TranscriptionResult) String() string {
+	if tr.Modified != "" {
+		return tr.Modified
+	}
+	return tr.Original
+}
+
+func (tr *TranscriptionResult) IsEmpty() bool {
+	return tr.Original == "" && tr.Modified == ""
+}
 
 func getOpenAIClient() (*openai.Client, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
@@ -23,10 +38,10 @@ func getOpenAIClient() (*openai.Client, error) {
 }
 
 // in my testing the Prompt parameter is not very good at repairing the transcription, so we do a two pass process instead
-func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (string, error) {
+func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (TranscriptionResult, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
-		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
+		return TranscriptionResult{}, fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
 	// Create a request for transcription
@@ -41,18 +56,20 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 	// Perform the transcription
 	resp, err := client.CreateTranscription(ctx, req)
 	if err != nil {
-		return "", fmt.Errorf("Error sending transcription request: %v", err)
+		return TranscriptionResult{}, fmt.Errorf("Error sending transcription request: %v", err)
 	}
+
+	result := TranscriptionResult{Original: resp.Text}
 
 	if instructions != "" {
 		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
 		if err != nil {
-			return "", fmt.Errorf("Error fixing transcription: %v", err)
+			return TranscriptionResult{}, fmt.Errorf("Error fixing transcription: %v", err)
 		}
-		return fixedText, nil
+		result.Modified = fixedText
 	}
 
-	return resp.Text, nil
+	return result, nil
 }
 
 func fixTranscription(ctx context.Context, transcribedText string, instructions string) (string, error) {
@@ -82,7 +99,7 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 		MaxTokens: 1024,
 	}
 
-	log.Printf("ChatCompletion for fixing transcription: %+v\n", req)
+	// log.Printf("ChatCompletion for fixing transcription: %+v\n", req)
 
 	resp, err := client.CreateChatCompletion(ctx, req)
 	if err != nil {
@@ -134,7 +151,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 		Messages: messages,
 	}
 
-	log.Printf("ChatCompletion: %+v\n", req)
+	// log.Printf("ChatCompletion: %+v\n", req)
 
 	// Perform the image description
 	resp, err := client.CreateChatCompletion(ctx, req)
