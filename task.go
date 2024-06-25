@@ -122,15 +122,29 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		descriptionCh := make(chan string, 1)
 
-		if config.IncludeNvim {
+		if config.IncludeScreen {
 			go func() {
-				log.Println("Reading content from nvim...")
+				defer close(descriptionCh)
+				description, err := describeScreen(t.ctx)
+				if err != nil {
+					log.Printf("Error describing screen: %v\n", err)
+					return
+				}
+				log.Printf("Screen Description: %s\n", description)
+
+				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
+				descriptionCh <- description
+			}()
+		} else if config.IncludeNvim {
+			go func() {
 				defer close(descriptionCh)
 				nvimClient := NewNvimClient()
 				if err := nvimClient.FindActiveNvim(); err != nil {
 					log.Printf("nivm: %v", err)
 					return
 				}
+
+				log.Printf("Using nvim socket: %s", nvimClient.socketFile)
 
 				visibleText, err := nvimClient.GetVisibleText("{{CURSOR}}")
 				if err != nil {
@@ -145,19 +159,6 @@ func (t *TranscribeTask) Start() chan TaskState {
 					visibleText,
 				)
 
-				descriptionCh <- description
-			}()
-		} else if config.IncludeScreen {
-			go func() {
-				defer close(descriptionCh)
-				description, err := describeScreen(t.ctx)
-				if err != nil {
-					log.Printf("Error describing screen: %v\n", err)
-					return
-				}
-				log.Printf("Screen Description: %s\n", description)
-
-				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
 				descriptionCh <- description
 			}()
 		} else {
