@@ -56,7 +56,7 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 	<body>
 		<h1>nvim Context</h1>
 		<form>
-			<label for="command">Enter Command:</label><br>
+			<label for="command">Enter Lua command:</label><br>
 			<textarea id="command" name="command" style="min-height: 100px;">{{.Command}}</textarea><br><br>
 			<input type="submit" value="Submit">
 		</form>
@@ -160,7 +160,7 @@ func startServer() {
 		var nvimError error
 
 		if command != "" {
-			nvimContext, nvimError = nvimClient.RemoteExecute(command)
+			nvimContext, nvimError = nvimClient.RemoteExecuteLua(command)
 		} else {
 			nvimContext, nvimError = nvimClient.GetVisibleText("<<CURSOR>>")
 		}

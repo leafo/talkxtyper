@@ -10,39 +10,44 @@ import (
 )
 
 var getVisibleTextCmd = template.Must(template.New("getVisibleTextCmd").Parse(`
-  local num_lines = {{.NumLines}}
-  local sigil = "{{.Sigil}}"
+	local mode = vim.api.nvim_get_mode()["mode"]
+	local num_lines = {{.NumLines}}
+	local sigil = "{{.Sigil}}"
 
-  local current_line = vim.api.nvim_win_get_cursor(0)[1]
-  local total_lines = vim.api.nvim_buf_line_count(0)
+	if mode == "i" then
+		local current_line = vim.api.nvim_win_get_cursor(0)[1]
+		local total_lines = vim.api.nvim_buf_line_count(0)
 
-  local start_line = math.max(1, current_line - num_lines)
-  local end_line = math.min(total_lines, current_line + num_lines)
+		local start_line = math.max(1, current_line - num_lines)
+		local end_line = math.min(total_lines, current_line + num_lines)
 
-  local before = vim.api.nvim_buf_get_lines(0, start_line-1, current_line - 1, false)
-  local after = vim.api.nvim_buf_get_lines(0, current_line, end_line, false)
+		local before = vim.api.nvim_buf_get_lines(0, start_line-1, current_line - 1, false)
+		local after = vim.api.nvim_buf_get_lines(0, current_line, end_line, false)
 
-  -- get the current line in two parts split by the cursor position
-  local cursor_pos = vim.api.nvim_win_get_cursor(0)[2]
-  local current_line_text = vim.api.nvim_buf_get_lines(0, current_line-1, current_line, false)[1]
+		-- get the current line in two parts split by the cursor position
+		local cursor_pos = vim.api.nvim_win_get_cursor(0)[2]
+		local current_line_text = vim.api.nvim_buf_get_lines(0, current_line-1, current_line, false)[1]
 
-  local before_cursor = string.sub(current_line_text, 1, cursor_pos)
-  local after_cursor = string.sub(current_line_text, cursor_pos + 1)
+		local before_cursor = string.sub(current_line_text, 1, cursor_pos)
+		local after_cursor = string.sub(current_line_text, cursor_pos + 1)
 
-  -- join the lines with the cursor inserted in the middle
-  local lines = {}
+		-- join the lines with the cursor inserted in the middle
+		local lines = {}
 
-  for i, line in ipairs(before) do
-    table.insert(lines, line)
-  end
+		for i, line in ipairs(before) do
+			table.insert(lines, line)
+		end
 
-  table.insert(lines, before_cursor .. sigil .. after_cursor)
+		table.insert(lines, before_cursor .. sigil .. after_cursor)
 
-  for i, line in ipairs(after) do
-    table.insert(lines, line)
-  end
+		for i, line in ipairs(after) do
+			table.insert(lines, line)
+		end
 
-  return table.concat(lines, "\n")
+		return table.concat(lines, "\n")
+	end
+
+	return "" -- don't want to type anything strange when in another mode
 `))
 
 type NvimClient struct {
