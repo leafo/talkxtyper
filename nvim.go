@@ -29,23 +29,49 @@ func findRemoteSocketFile(pid string) (string, error) {
 
 // sets the socket to the active window if it's an nvim instance
 func (client *NvimClient) FindActiveNvim() error {
+	// find the PID of the active window in X
 	cmd := exec.Command("sh", "-c", `xprop -root _NET_ACTIVE_WINDOW | awk '{print $5}' | xargs -I {} xprop -id {} _NET_WM_PID | awk '{print $3}'`)
 	output, err := cmd.Output()
 	if err != nil {
 		return err
 	}
 	pid := strings.TrimSpace(string(output))
+
 	if pid == "" {
 		return fmt.Errorf("No active window found")
 	}
 
-	socketFile, err := findRemoteSocketFile(pid)
-	if err != nil {
-		return err
+	var searchPid func(string) (string, error)
+	searchPid = func(currentPid string) (string, error) {
+		socketFile, err := findRemoteSocketFile(currentPid)
+
+		if err == nil {
+			return socketFile, nil
+		}
+
+		cmd := exec.Command("sh", "-c", fmt.Sprintf(`pgrep -P %s`, currentPid))
+		output, err := cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		childPids := strings.Split(strings.TrimSpace(string(output)), "\n")
+
+		for _, childPid := range childPids {
+			socketFile, err = searchPid(childPid)
+			if err == nil {
+				return socketFile, nil
+			}
+		}
+		return "", fmt.Errorf("No nvim process within PID %s", currentPid)
 	}
 
-	client.socketFile = socketFile
-	return nil
+	socketFile, err := searchPid(pid)
+	if err == nil {
+		client.socketFile = socketFile
+		return nil
+	}
+
+	return fmt.Errorf("No nvim process found as a subprocess of PID %s", pid)
 }
 
 // find any running nvim server and set the socket file path
