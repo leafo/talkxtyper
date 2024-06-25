@@ -10,6 +10,8 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+var fixPrompt = `You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type. You will output only the updated transcription and no other text. Do not output information not said in the original transcription.`
+
 type TranscriptionResult struct {
 	Original string
 	Modified string
@@ -81,7 +83,7 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 	var messages = []openai.ChatCompletionMessage{
 		{
 			Role:    "system",
-			Content: "You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type. You will output only the updated transcription and no other text. Do not output information not said in the original transcription.",
+			Content: fixPrompt,
 		},
 		{
 			Role:    "user",
