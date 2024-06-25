@@ -121,7 +121,32 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		descriptionCh := make(chan string, 1)
 
-		if config.IncludeScreen {
+		if config.IncludeNvim {
+			go func() {
+				log.Println("Reading content from nvim...")
+				defer close(descriptionCh)
+				nvimClient := NewNvimClient()
+				if err := nvimClient.FindActiveNvim(); err != nil {
+					log.Printf("nivm: %v", err)
+					return
+				}
+
+				visibleText, err := nvimClient.GetVisibleText("{{CURSOR}}")
+				if err != nil {
+					log.Printf("Error getting visible text from nvim: %v", err)
+					return
+				}
+
+				log.Printf("Inserting nvim context: %s", visibleText)
+
+				description := fmt.Sprintf(
+					"You are a voice to text typing assistant who is converting the audio to text to be inserted into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
+					visibleText,
+				)
+
+				descriptionCh <- description
+			}()
+		} else if config.IncludeScreen {
 			go func() {
 				defer close(descriptionCh)
 				description, err := describeScreen(t.ctx)
