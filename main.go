@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"flag"
+
 	"github.com/getlantern/systray"
 	"github.com/go-vgo/robotgo"
 	"golang.design/x/hotkey"
@@ -13,11 +15,33 @@ import (
 var DEFAULT_TITLE = "TalkXTyper"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--help" {
+	help := flag.Bool("help", false, "Show this help message")
+	nvimTest := flag.Bool("nvim-test", false, "Test nvim integration")
+	flag.Parse()
+
+	if *help {
 		fmt.Println("Usage: talkxtyper [options]")
-		fmt.Println("Starts the TalkXTyper application in the system tray.")
+		fmt.Printf("Starts the %s application in the system tray.\n", DEFAULT_TITLE)
 		fmt.Println("Options:")
 		fmt.Println("  --help        Show this help message")
+		fmt.Println("  --nvim-test   Test nvim integration")
+		return
+	}
+
+	if *nvimTest {
+		client := NewNvimClient()
+		err := client.FindFirstNvim()
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to find remote socket: %v\n", err)
+			os.Exit(1)
+		}
+		result, err := client.GetVisibleText()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting visible text from nvim: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("nvim test result:", result)
 		return
 	}
 
