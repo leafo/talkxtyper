@@ -107,6 +107,7 @@ func onReady() {
 	mAbort.Hide()
 
 	mIncludeScreen := systray.AddMenuItemCheckbox("Include screen", "Analyze the screen to augment the transcription", config.IncludeScreen)
+	mIncludeNvim := systray.AddMenuItemCheckbox("Include nvim", "Include text from current nvim viewport in the transcription", config.IncludeNvim)
 
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
@@ -159,6 +160,19 @@ func onReady() {
 				}
 
 				config.IncludeScreen = mIncludeScreen.Checked()
+
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
+
+			case <-mIncludeNvim.ClickedCh:
+				if mIncludeNvim.Checked() {
+					mIncludeNvim.Uncheck()
+				} else {
+					mIncludeNvim.Check()
+				}
+
+				config.IncludeNvim = mIncludeNvim.Checked()
 
 				if err := writeConfig(); err != nil {
 					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
