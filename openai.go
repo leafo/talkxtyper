@@ -17,23 +17,6 @@ You will output only the updated transcription and no other text. Do not output 
 // tests:
 // The transcription was generated from spoken words and may contain errors. Please use the text provided to identify and correct any inaccuracies, focusing on misheard words, technical terms, or any context-specific discrepancies.
 
-type TranscriptionResult struct {
-	Original     string
-	Modified     string
-	RepairPrompt string
-}
-
-func (tr *TranscriptionResult) String() string {
-	if tr.Modified != "" {
-		return tr.Modified
-	}
-	return tr.Original
-}
-
-func (tr *TranscriptionResult) IsEmpty() bool {
-	return tr.Original == "" && tr.Modified == ""
-}
-
 func getOpenAIClient() (*openai.Client, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {

@@ -23,7 +23,24 @@ type TaskManager struct {
 	transcriptionRes chan TranscriptionResult
 	stateCh          chan TaskState
 	context          atomic.Pointer[string]
-	history          atomic.Pointer[[]string]
+	history          atomic.Pointer[[]TranscriptionResult]
+}
+
+type TranscriptionResult struct {
+	Original     string
+	Modified     string
+	RepairPrompt string
+}
+
+func (tr *TranscriptionResult) String() string {
+	if tr.Modified != "" {
+		return tr.Modified
+	}
+	return tr.Original
+}
+
+func (tr *TranscriptionResult) IsEmpty() bool {
+	return tr.Original == "" && tr.Modified == ""
 }
 
 // task managers ensures only only one task is running at a time and cancels
@@ -33,7 +50,7 @@ var taskManager = TaskManager{
 	transcriptionRes: make(chan TranscriptionResult),
 	stateCh:          make(chan TaskState, 10),
 	context:          atomic.Pointer[string]{},
-	history:          atomic.Pointer[[]string]{},
+	history:          atomic.Pointer[[]TranscriptionResult]{},
 }
 
 func (tm *TaskManager) StartNewTask() {
@@ -238,6 +255,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 		}
 
 		t.SetResult(transcription)
+		taskManager.AppendToHistory(transcription)
 		close(stateCh)
 	}()
 
@@ -252,16 +270,27 @@ func (tm *TaskManager) SetContext(ctx string) {
 	tm.context.Store(&ctx)
 }
 
-func (tm *TaskManager) AppendToHistory(entry string) {
+func (tm *TaskManager) AppendToHistory(entry TranscriptionResult) {
 	for {
 		oldHistory := tm.history.Load()
-		newHistory := append(*oldHistory, entry)
-		if tm.history.CompareAndSwap(oldHistory, &newHistory) {
-			break
+		if oldHistory == nil {
+			newHistory := []TranscriptionResult{entry}
+			if tm.history.CompareAndSwap(nil, &newHistory) {
+				break
+			}
+		} else {
+			newHistory := append(*oldHistory, entry)
+			if tm.history.CompareAndSwap(oldHistory, &newHistory) {
+				break
+			}
 		}
 	}
 }
 
-func (tm *TaskManager) GetHistory() []string {
-	return append([]string(nil), *tm.history.Load()...)
+func (tm *TaskManager) GetHistory() []TranscriptionResult {
+	history := tm.history.Load()
+	if history == nil {
+		return []TranscriptionResult{}
+	}
+	return append([]TranscriptionResult(nil), *history...)
 }

@@ -23,6 +23,7 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 			<li><a href="/abort-recording">Abort Recording</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
 			<li><a href="/nvim">nvim Remote</a></li>
+			<li><a href="/history">History</a></li>
 		</ul>
 	</body>
 	</html>
@@ -84,6 +85,36 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 			})();
 		</script>
 
+	</body>
+	</html>
+`))
+
+var historyPageTemplate = template.Must(template.New("history").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>History</title>
+	</head>
+	<body>
+		<h1>History</h1>
+		{{if .History}}
+			<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+				<tr>
+					<th>Original</th>
+					<th>Modified</th>
+					<th>Repair Prompt</th>
+				</tr>
+				{{range .History}}
+					<tr>
+						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
+						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
+						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
+					</tr>
+				{{end}}
+			</table>
+		{{else}}
+			<p>No history available</p>
+		{{end}}
 	</body>
 	</html>
 `))
@@ -180,6 +211,15 @@ func startServer() {
 			"Error":   nvimError,
 		})
 
+		if err != nil {
+			http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		}
+	}))
+
+	http.HandleFunc("/history", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		history := taskManager.GetHistory()
+
+		err := historyPageTemplate.Execute(w, map[string]interface{}{"History": history})
 		if err != nil {
 			http.Error(w, "Error rendering template", http.StatusInternalServerError)
 		}
