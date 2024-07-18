@@ -10,7 +10,12 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-var fixPrompt = `You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type. You will output only the updated transcription and no other text. Do not output information not said in the original transcription.`
+var fixPrompt = `You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type.
+
+You will output only the updated transcription and no other text. Do not output information not spoken in the original transcription.`
+
+// tests:
+// The transcription was generated from spoken words and may contain errors. Please use the text provided to identify and correct any inaccuracies, focusing on misheard words, technical terms, or any context-specific discrepancies.
 
 type TranscriptionResult struct {
 	Original string
