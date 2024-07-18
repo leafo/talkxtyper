@@ -276,3 +276,15 @@ func (client *NvimClient) GetCurrentMode() (NvimMode, error) {
 	}
 	return NvimMode(strings.TrimSpace(modeOutput)), nil
 }
+
+// Returns the title of the current nvim window
+func (client *NvimClient) GetCurrentTitle() (string, error) {
+	titleOutput, err := client.RemoteExecuteLua(`
+		return vim.fn.expand("%:t")
+	`)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(titleOutput), nil
+}
