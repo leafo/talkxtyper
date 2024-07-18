@@ -146,20 +146,48 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 				log.Printf("Using nvim socket: %s", nvimClient.socketFile)
 
-				visibleText, err := nvimClient.GetInsertionText("{{CURSOR}}")
+				var visibleText string
+				var err error
+
+				currentMode, err := nvimClient.GetCurrentMode()
 				if err != nil {
-					log.Printf("Error getting visible text from nvim: %v", err)
+					log.Printf("Error getting current nvim mode: %v", err)
 					return
 				}
 
-				log.Printf("Inserting nvim context: %s", visibleText)
+				switch currentMode {
+				case InsertMode:
+					insertionText, err := nvimClient.GetInsertionText("{{CURSOR}}")
 
-				description := fmt.Sprintf(
-					"You are a voice to text typing assistant who is converting the audio to text to be inserted into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
-					visibleText,
-				)
+					if err != nil {
+						log.Printf("Error getting insertion text: %v", err)
+						return
+					}
 
-				descriptionCh <- description
+					log.Printf("Inserting nvim context: %s", insertionText)
+					descriptionCh <- fmt.Sprintf(
+						"You are a voice to text typing assistant who is converting the audio to text to be inserted into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
+						insertionText,
+					)
+
+				case NormalMode, VisualMode, CommandMode:
+					visibleText, err = nvimClient.GetVisibleText()
+					if err != nil {
+						log.Printf("Error getting visible text: %v", err)
+						return
+					}
+
+					log.Printf("Visible nvim context: %s", visibleText)
+					descriptionCh <- fmt.Sprintf(
+						"Use the following content of the user's screen to aid to transcribing the audio:\n%s",
+						visibleText,
+					)
+
+				default:
+					log.Printf("Unhandled nvim mode, skipping description: %s", currentMode)
+					return
+				}
+
 			}()
 		} else {
 			close(descriptionCh)

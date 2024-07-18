@@ -18,7 +18,7 @@ var DEFAULT_TITLE = "TalkXTyper"
 
 func main() {
 	help := flag.Bool("help", false, "Show this help message")
-	nvimTest := flag.String("nvim-test", "", "Test nvim integration (possible values: insertion, visible)")
+	nvimTest := flag.String("nvim-test", "", "Test nvim integration (possible values: insertion, visible, mode)")
 	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
 	reportScreen := flag.Bool("report-screen", false, "Test screen description system, and exit")
 	flag.Parse()
@@ -44,6 +44,10 @@ func main() {
 			result, err = client.GetInsertionText("<<CURSOR>>")
 		case "visible":
 			result, err = client.GetVisibleText()
+		case "mode":
+			var mode NvimMode
+			mode, err = client.GetCurrentMode()
+			result = string(mode)
 		default:
 			fmt.Fprintf(os.Stderr, "Invalid nvim-test value: %s\n", *nvimTest)
 			os.Exit(1)

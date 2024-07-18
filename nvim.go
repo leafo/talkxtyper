@@ -9,6 +9,15 @@ import (
 	"text/template"
 )
 
+type NvimMode string
+
+const (
+	NormalMode  NvimMode = "n"
+	InsertMode  NvimMode = "i"
+	CommandMode NvimMode = "c"
+	VisualMode  NvimMode = "v"
+)
+
 var getModeCmd = template.Must(template.New("getModeCmd").Parse(`
 	return vim.api.nvim_get_mode()["mode"]
 `))
@@ -254,7 +263,7 @@ func (client *NvimClient) GetVisibleText() (string, error) {
 	return output, nil
 }
 
-func (client *NvimClient) GetCurrentMode() (string, error) {
+func (client *NvimClient) GetCurrentMode() (NvimMode, error) {
 	var modeCmd strings.Builder
 	err := getModeCmd.Execute(&modeCmd, nil)
 	if err != nil {
@@ -265,5 +274,5 @@ func (client *NvimClient) GetCurrentMode() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return modeOutput, nil
+	return NvimMode(strings.TrimSpace(modeOutput)), nil
 }
