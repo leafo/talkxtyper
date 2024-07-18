@@ -9,6 +9,10 @@ import (
 	"text/template"
 )
 
+var getModeCmd = template.Must(template.New("getModeCmd").Parse(`
+	return vim.api.nvim_get_mode()["mode"]
+`))
+
 var getInsertionTextCmd = template.Must(template.New("getInsertionTextCmd").Parse(`
 	local mode = vim.api.nvim_get_mode()["mode"]
 	local num_lines = {{.NumLines}}
@@ -51,10 +55,11 @@ var getInsertionTextCmd = template.Must(template.New("getInsertionTextCmd").Pars
 `))
 
 // get text across all visible buffers
+// contextExtend is the number of lines to include outside the visible buffer
 var getVisibleTextCmd = template.Must(template.New("getVisibleTextCmd").Parse(`
 	-- backticks can't be escaped in raw go string literal
 	local three_ticks = string.rep(string.char(96), 3)
-	local CONTEXT_EXTEND = 20
+	local CONTEXT_EXTEND = {{.ContextExtend}}
 
 	-- This generates a context string of the currently visible text in the
 	-- specified win_id (or the current window if none is specified)
@@ -231,7 +236,10 @@ func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
 // Returns all the visible text in the current nvim window
 func (client *NvimClient) GetVisibleText() (string, error) {
 	var visibleTextCmd strings.Builder
-	err := getVisibleTextCmd.Execute(&visibleTextCmd, nil)
+	err := getVisibleTextCmd.Execute(&visibleTextCmd, map[string]interface{}{
+		"ContextExtend": 20,
+	})
+
 	if err != nil {
 		return "", err
 	}
@@ -244,4 +252,18 @@ func (client *NvimClient) GetVisibleText() (string, error) {
 	}
 
 	return output, nil
+}
+
+func (client *NvimClient) GetCurrentMode() (string, error) {
+	var modeCmd strings.Builder
+	err := getModeCmd.Execute(&modeCmd, nil)
+	if err != nil {
+		return "", err
+	}
+
+	modeOutput, err := client.RemoteExecuteLua(modeCmd.String())
+	if err != nil {
+		return "", err
+	}
+	return modeOutput, nil
 }
