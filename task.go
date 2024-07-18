@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 	"sync/atomic"
 )
 
@@ -21,8 +22,9 @@ type TaskManager struct {
 	currentTask      atomic.Pointer[TranscribeTask]
 	transcriptionRes chan TranscriptionResult
 	stateCh          chan TaskState
-	context          atomic.Value // string
-	history          []string     // history of transcriptions
+	context          string
+	history          []string // history of transcriptions
+	mu               sync.Mutex
 }
 
 // task managers ensures only only one task is running at a time and cancels
@@ -81,7 +83,8 @@ type TranscribeTask struct {
 	stopRecordingCh chan struct{}
 	ctx             context.Context
 	cancel          context.CancelFunc
-	result          atomic.Value // TranscriptionResult
+	result          TranscriptionResult
+	mu              sync.Mutex
 }
 
 func NewTranscribeTask() *TranscribeTask {
@@ -89,7 +92,7 @@ func NewTranscribeTask() *TranscribeTask {
 	return &TranscribeTask{
 		ctx:    ctx,
 		cancel: cancel,
-		result: atomic.Value{},
+		result: TranscriptionResult{},
 	}
 }
 
@@ -107,10 +110,15 @@ func (t *TranscribeTask) Abort() {
 }
 
 func (t *TranscribeTask) GetResult() TranscriptionResult {
-	if result, ok := t.result.Load().(TranscriptionResult); ok {
-		return result
-	}
-	return TranscriptionResult{}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.result
+}
+
+func (t *TranscribeTask) SetResult(result TranscriptionResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.result = result
 }
 
 func (t *TranscribeTask) Start() chan TaskState {
@@ -228,7 +236,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 			log.Printf("Transcription: %s\n", transcriptionJSON)
 		}
 
-		t.result.Store(transcription)
+		t.SetResult(transcription)
 		close(stateCh)
 	}()
 
@@ -236,16 +244,25 @@ func (t *TranscribeTask) Start() chan TaskState {
 }
 
 func (tm *TaskManager) GetContext() string {
-	if context, ok := tm.context.Load().(string); ok {
-		return context
-	}
-	return ""
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return tm.context
 }
 
 func (tm *TaskManager) SetContext(ctx string) {
-	tm.context.Store(ctx)
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	tm.context = ctx
 }
 
 func (tm *TaskManager) AppendToHistory(entry string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 	tm.history = append(tm.history, entry)
+}
+
+func (tm *TaskManager) GetHistory() []string {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	return append([]string(nil), tm.history...)
 }
