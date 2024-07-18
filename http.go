@@ -162,7 +162,7 @@ func startServer() {
 		if command != "" {
 			nvimContext, nvimError = nvimClient.RemoteExecuteLua(command)
 		} else {
-			nvimContext, nvimError = nvimClient.GetVisibleText("<<CURSOR>>")
+			nvimContext, nvimError = nvimClient.GetInsertionText("<<CURSOR>>")
 		}
 
 		err = nvimPageTemplate.Execute(w, map[string]interface{}{

@@ -146,7 +146,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 				log.Printf("Using nvim socket: %s", nvimClient.socketFile)
 
-				visibleText, err := nvimClient.GetVisibleText("{{CURSOR}}")
+				visibleText, err := nvimClient.GetInsertionText("{{CURSOR}}")
 				if err != nil {
 					log.Printf("Error getting visible text from nvim: %v", err)
 					return

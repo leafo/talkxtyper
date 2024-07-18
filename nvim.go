@@ -9,7 +9,7 @@ import (
 	"text/template"
 )
 
-var getVisibleTextCmd = template.Must(template.New("getVisibleTextCmd").Parse(`
+var getInsertionTextCmd = template.Must(template.New("getInsertionTextCmd").Parse(`
 	local mode = vim.api.nvim_get_mode()["mode"]
 	local num_lines = {{.NumLines}}
 	local sigil = "{{.Sigil}}"
@@ -165,9 +165,11 @@ func (client *NvimClient) RemoteExecuteLua(command string) (string, error) {
 	return client.RemoteExecute(luaCommand)
 }
 
-func (client *NvimClient) GetVisibleText(cursorSigil string) (string, error) {
-	var visibleTextCmd strings.Builder
-	err := getVisibleTextCmd.Execute(&visibleTextCmd, map[string]interface{}{
+// This returns the text in nvim surroundijng the cursor when in insertion
+// mode
+func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
+	var insertionTextCmd strings.Builder
+	err := getInsertionTextCmd.Execute(&insertionTextCmd, map[string]interface{}{
 		"NumLines": 20,
 		"Sigil":    cursorSigil,
 	})
@@ -175,10 +177,10 @@ func (client *NvimClient) GetVisibleText(cursorSigil string) (string, error) {
 		return "", err
 	}
 
-	visibleTextOutput, err := client.RemoteExecuteLua(visibleTextCmd.String())
+	insertionTextOutput, err := client.RemoteExecuteLua(insertionTextCmd.String())
 	if err != nil {
 		return "", err
 	}
 
-	return visibleTextOutput, nil
+	return insertionTextOutput, nil
 }

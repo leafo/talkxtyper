@@ -36,7 +36,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to find remote socket: %v\n", err)
 			os.Exit(1)
 		}
-		result, err := client.GetVisibleText("<<CURSOR>>")
+		result, err := client.GetInsertionText("<<CURSOR>>")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting visible text from nvim: %v\n", err)
 			os.Exit(1)
