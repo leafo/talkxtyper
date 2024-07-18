@@ -8,6 +8,9 @@ GO_FILES := $(PNG_FILES:.png=.go)
 run:
 	go run *.go
 
+build:
+	go build -o talkxtyper *.go
+
 # Default target
 icons: $(GO_FILES)
 
