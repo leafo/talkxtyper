@@ -22,7 +22,7 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 			<li><a href="/stop-recording">Stop Recording</a></li>
 			<li><a href="/abort-recording">Abort Recording</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
-			<li><a href="/nvim">Show nvim context</a></li>
+			<li><a href="/nvim">nvim Remote</a></li>
 		</ul>
 	</body>
 	</html>
@@ -54,11 +54,15 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 		<title>nvim Context</title>
 	</head>
 	<body>
-		<h1>nvim Context</h1>
+		<h1>nvim remote</h1>
 		<form>
 			<label for="command">Enter Lua command:</label><br>
-			<textarea id="command" name="command" style="min-height: 100px;">{{.Command}}</textarea><br><br>
-			<input type="submit" value="Submit">
+			<textarea id="command" name="command" style="min-height: 100px; width: 100%; box-sizing: border-box;">{{.Command}}</textarea><br><br>
+
+			<div>
+				<input type="submit" value="Submit">
+				<button type="submit" name="refresh" value="on">Auto Refresh</button>
+			</div>
 		</form>
 
 		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
@@ -66,12 +70,17 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 		<pre>{{.Context}}</pre>
 		<script>
 			(function() {
-				function refreshPage() {
-					if (!document.activeElement || (document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT")) {
-						location.reload();
+				const urlParams = new URLSearchParams(window.location.search);
+				const refresh = urlParams.get('refresh');
+				console.log("have refresh param:", refresh);
+				if (refresh) {
+					function refreshPage() {
+						if (!document.activeElement || (document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT")) {
+							location.reload();
+						}
 					}
+					setInterval(refreshPage, 1000);
 				}
-				setInterval(refreshPage, 1000);
 			})();
 		</script>
 
