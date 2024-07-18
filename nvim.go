@@ -50,6 +50,50 @@ var getInsertionTextCmd = template.Must(template.New("getInsertionTextCmd").Pars
 	return "" -- don't want to type anything strange when in another mode
 `))
 
+// get text across all visible buffers
+var getVisibleTextCmd = template.Must(template.New("getVisibleTextCmd").Parse(`
+	-- backticks can't be escaped in raw go string literal
+	local three_ticks = string.rep(string.char(96), 3)
+	local CONTEXT_EXTEND = 20
+
+	-- This generates a context string of the currently visible text in the
+	-- specified win_id (or the current window if none is specified)
+	-- Format:
+	-- filename:start_line-end_line
+	-- {visible_lines}
+	local function get_context(win_id)
+		if not win_id then
+			win_id = 0
+		end
+
+		local out
+
+		vim.api.nvim_win_call(win_id, function()
+			local filename = vim.fn.expand("%")
+			local first_visible = math.max(1, vim.fn.line("w0") - CONTEXT_EXTEND)
+			local last_visible = math.min(vim.fn.line("$"), vim.fn.line("w$") + CONTEXT_EXTEND)
+
+			if first_visible < 20 then
+				first_visible = 1
+			end
+
+			local visible_lines = vim.api.nvim_buf_get_lines(0, first_visible - 1, last_visible, false)
+			local header = string.format("%s:%d-%d", filename, first_visible, last_visible)
+
+			out = "START " .. header .. "\n" .. three_ticks .. "\n" .. table.concat(visible_lines, "\n") .. "\n" .. three_ticks .. "\nEND " .. header
+		end)
+
+		return out
+	end
+
+	local contexts = {}
+	for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+		table.insert(contexts, get_context(win_id))
+	end
+
+	return table.concat(contexts, "\n")
+`))
+
 type NvimClient struct {
 	socketFile string
 }
@@ -165,8 +209,7 @@ func (client *NvimClient) RemoteExecuteLua(command string) (string, error) {
 	return client.RemoteExecute(luaCommand)
 }
 
-// This returns the text in nvim surroundijng the cursor when in insertion
-// mode
+// Returns the text in nvim surrounding the cursor when in insertion mode
 func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
 	var insertionTextCmd strings.Builder
 	err := getInsertionTextCmd.Execute(&insertionTextCmd, map[string]interface{}{
@@ -183,4 +226,22 @@ func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
 	}
 
 	return insertionTextOutput, nil
+}
+
+// Returns all the visible text in the current nvim window
+func (client *NvimClient) GetVisibleText() (string, error) {
+	var visibleTextCmd strings.Builder
+	err := getVisibleTextCmd.Execute(&visibleTextCmd, nil)
+	if err != nil {
+		return "", err
+	}
+
+	command := visibleTextCmd.String()
+
+	output, err := client.RemoteExecuteLua(command)
+	if err != nil {
+		return "", err
+	}
+
+	return output, nil
 }

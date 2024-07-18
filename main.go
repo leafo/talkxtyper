@@ -18,7 +18,7 @@ var DEFAULT_TITLE = "TalkXTyper"
 
 func main() {
 	help := flag.Bool("help", false, "Show this help message")
-	nvimTest := flag.Bool("nvim-test", false, "Test nvim integration")
+	nvimTest := flag.String("nvim-test", "", "Test nvim integration (possible values: insertion, visible)")
 	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
 	reportScreen := flag.Bool("report-screen", false, "Test screen description system, and exit")
 	flag.Parse()
@@ -28,7 +28,7 @@ func main() {
 		return
 	}
 
-	if *nvimTest {
+	if *nvimTest != "" {
 		client := NewNvimClient()
 		err := client.FindFirstNvim()
 
@@ -36,7 +36,19 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Failed to find remote socket: %v\n", err)
 			os.Exit(1)
 		}
-		result, err := client.GetInsertionText("<<CURSOR>>")
+
+		var result string
+
+		switch *nvimTest {
+		case "insertion":
+			result, err = client.GetInsertionText("<<CURSOR>>")
+		case "visible":
+			result, err = client.GetVisibleText()
+		default:
+			fmt.Fprintf(os.Stderr, "Invalid nvim-test value: %s\n", *nvimTest)
+			os.Exit(1)
+		}
+
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting visible text from nvim: %v\n", err)
 			os.Exit(1)
