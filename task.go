@@ -22,9 +22,8 @@ type TaskManager struct {
 	currentTask      atomic.Pointer[TranscribeTask]
 	transcriptionRes chan TranscriptionResult
 	stateCh          chan TaskState
-	context          string
-	history          []string // history of transcriptions
-	mu               sync.Mutex
+	context          atomic.Pointer[string]
+	history          atomic.Pointer[[]string]
 }
 
 // task managers ensures only only one task is running at a time and cancels
@@ -33,6 +32,8 @@ var taskManager = TaskManager{
 	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
 	transcriptionRes: make(chan TranscriptionResult),
 	stateCh:          make(chan TaskState, 10),
+	context:          atomic.Pointer[string]{},
+	history:          atomic.Pointer[[]string]{},
 }
 
 func (tm *TaskManager) StartNewTask() {
@@ -244,25 +245,23 @@ func (t *TranscribeTask) Start() chan TaskState {
 }
 
 func (tm *TaskManager) GetContext() string {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	return tm.context
+	return *tm.context.Load()
 }
 
 func (tm *TaskManager) SetContext(ctx string) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	tm.context = ctx
+	tm.context.Store(&ctx)
 }
 
 func (tm *TaskManager) AppendToHistory(entry string) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	tm.history = append(tm.history, entry)
+	for {
+		oldHistory := tm.history.Load()
+		newHistory := append(*oldHistory, entry)
+		if tm.history.CompareAndSwap(oldHistory, &newHistory) {
+			break
+		}
+	}
 }
 
 func (tm *TaskManager) GetHistory() []string {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	return append([]string(nil), tm.history...)
+	return append([]string(nil), *tm.history.Load()...)
 }
