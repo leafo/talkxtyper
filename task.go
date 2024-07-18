@@ -166,7 +166,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 					log.Printf("Inserting nvim context: %s", insertionText)
 					descriptionCh <- fmt.Sprintf(
-						"You are a voice to text typing assistant who is converting the audio to text to be inserted into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
+						"The user is inserting into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
 						insertionText,
 					)
 
@@ -179,7 +179,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 					log.Printf("Visible nvim context: %s", visibleText)
 					descriptionCh <- fmt.Sprintf(
-						"Use the following content of the user's screen to aid to transcribing the audio:\n%s",
+						"The user is in a text editor with the following content:\n%s",
 						visibleText,
 					)
 

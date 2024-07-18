@@ -18,8 +18,9 @@ You will output only the updated transcription and no other text. Do not output 
 // The transcription was generated from spoken words and may contain errors. Please use the text provided to identify and correct any inaccuracies, focusing on misheard words, technical terms, or any context-specific discrepancies.
 
 type TranscriptionResult struct {
-	Original string
-	Modified string
+	Original     string
+	Modified     string
+	RepairPrompt string
 }
 
 func (tr *TranscriptionResult) String() string {
@@ -69,6 +70,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 	result := TranscriptionResult{Original: resp.Text}
 
 	if instructions != "" {
+		result.RepairPrompt = instructions
 		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
 		if err != nil {
 			return TranscriptionResult{}, fmt.Errorf("Error fixing transcription: %v", err)
