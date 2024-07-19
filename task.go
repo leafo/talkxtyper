@@ -54,12 +54,12 @@ var taskManager = TaskManager{
 }
 
 func (tm *TaskManager) StartNewTask() {
-	if currentTask := tm.currentTask.Load(); currentTask != nil {
-		currentTask.Abort()
-	}
-
 	newTask := NewTranscribeTask()
-	tm.currentTask.Store(newTask)
+
+	oldTask := tm.currentTask.Swap(newTask)
+	if oldTask != nil {
+		oldTask.Abort()
+	}
 
 	stateCh := newTask.Start()
 
