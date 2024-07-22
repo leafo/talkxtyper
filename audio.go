@@ -28,8 +28,22 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	}
 	defer portaudio.Terminate()
 
+	// TODO: allow user to specify input device, the default is failing on my computer
+	inputDevice, err := findDeviceByName("pipewire")
+	if err != nil {
+		return nil, fmt.Errorf("Error finding input device: %v", err)
+	}
+
 	var recordingBuffer []int16
-	stream, err := portaudio.OpenDefaultStream(1, 0, sampleRate, bufferSize, func(in []int16) {
+	stream, err := portaudio.OpenStream(portaudio.StreamParameters{
+		Input: portaudio.StreamDeviceParameters{
+			Device:   inputDevice,
+			Channels: 1,
+			Latency:  inputDevice.DefaultLowInputLatency,
+		},
+		SampleRate:      sampleRate,
+		FramesPerBuffer: bufferSize,
+	}, func(in []int16) {
 		if debug {
 			log.Printf("Chunk length: %d\n", len(in))
 			log.Printf("Input chunk: %+v\n", in)
@@ -93,7 +107,7 @@ func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
 }
 
 func playRecording(recordingBuffer []int16) error {
-	outputDevice, err := findOutputDeviceByName("pipewire")
+	outputDevice, err := findDeviceByName("pipewire")
 	if err != nil {
 		return fmt.Errorf("Error finding output device: %v", err)
 	}
@@ -105,18 +119,35 @@ func playRecording(recordingBuffer []int16) error {
 	return nil
 }
 
-func findOutputDeviceByName(name string) (*portaudio.DeviceInfo, error) {
+func findDeviceByName(name string) (*portaudio.DeviceInfo, error) {
 	devices, err := portaudio.Devices()
 	if err != nil {
 		return nil, fmt.Errorf("Error listing devices: %v", err)
 	}
-
 	for _, device := range devices {
-		if device.Name == name && device.MaxOutputChannels > 0 {
+		if device.Name == name {
 			return device, nil
 		}
 	}
 	return nil, fmt.Errorf("Output device '%s' not found", name)
+}
+
+// init portaudio and print out all deivices with their names and number of inputs and outpuits
+func debugAudioDevices() {
+	err := portaudio.Initialize()
+	if err != nil {
+		log.Fatalf("Error initializing PortAudio: %v", err)
+	}
+	defer portaudio.Terminate()
+
+	devices, err := portaudio.Devices()
+	if err != nil {
+		log.Fatalf("Error listing devices: %v", err)
+	}
+
+	for _, device := range devices {
+		fmt.Printf("Name: %s, MaxInputChannels: %d, MaxOutputChannels: %d\n", device.Name, device.MaxInputChannels, device.MaxOutputChannels)
+	}
 }
 
 func playRecordingToDevice(recordingBuffer []int16, outputDevice *portaudio.DeviceInfo) error {

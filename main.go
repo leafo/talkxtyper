@@ -21,10 +21,18 @@ func main() {
 	nvimTest := flag.String("nvim-test", "", "Test nvim integration (possible values: insertion, visible, mode, title)")
 	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
 	reportScreen := flag.Bool("report-screen", false, "Test screen description system, and exit")
+	audioDevices := flag.Bool("audio-devices", false, "Print out all audio devices and exit")
+
 	flag.Parse()
 
 	if *help {
 		flag.Usage()
+		return
+	}
+
+	if *audioDevices {
+		log.Println("Available pipewire devices:")
+		debugAudioDevices()
 		return
 	}
 
