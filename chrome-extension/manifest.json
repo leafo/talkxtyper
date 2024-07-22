@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "TalkTyper",
+  "version": "1.0",
+  "description": "Communication layer with the TalkXTyper application",
+  "permissions": [
+    "activeTab",
+    "declarativeContent",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["talkxtyper.js"]
+    }
+  ],
+  "icons": {
+    "48": "icon.png"
+  }
+}
