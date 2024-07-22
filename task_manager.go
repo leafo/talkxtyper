@@ -51,7 +51,7 @@ func (tm *TaskManager) StartNewTask() *TranscribeTask {
 		// either publish the result to the task listener or send it to task manager
 
 		if tm.currentTask.CompareAndSwap(newTask, nil) {
-			if result := newTask.GetResult(); !result.IsEmpty() {
+			if result := newTask.GetResult(); result != nil {
 				tm.transcriptionRes <- result
 			}
 		}

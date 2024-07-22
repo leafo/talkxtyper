@@ -32,10 +32,6 @@ func (tr *TranscriptionResult) String() string {
 	return tr.Original
 }
 
-func (tr *TranscriptionResult) IsEmpty() bool {
-	return tr.Original == "" && tr.Modified == ""
-}
-
 // NOTE: all methods for this type should be thread safe
 type TranscribeTask struct {
 	stopRecordingCh chan struct{}
@@ -45,6 +41,7 @@ type TranscribeTask struct {
 	mu              sync.Mutex
 }
 
+// TODO: this should take a context
 func NewTranscribeTask() *TranscribeTask {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TranscribeTask{
