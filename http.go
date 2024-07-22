@@ -20,9 +20,6 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 		<p>HTTP API:</p>
 		<ul>
 			<li><a href="/context">Context</a></li>
-			<li><a href="/start-recording">Start Recording</a></li>
-			<li><a href="/stop-recording">Stop Recording</a></li>
-			<li><a href="/abort-recording">Abort Recording</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
 			<li><a href="/nvim">nvim Remote</a></li>
 			<li><a href="/history">History</a></li>
@@ -146,23 +143,6 @@ func startServer() {
 		if err != nil {
 			http.Error(w, "Error rendering template", http.StatusInternalServerError)
 		}
-	}))
-
-	http.HandleFunc("/start-recording", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		taskManager.StartNewTask()
-		fmt.Fprintf(w, "Recording started")
-	}))
-
-	http.HandleFunc("/stop-recording", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: can we make a method to assign the task to the request so we can
-		// get transcription result from the http api
-		taskManager.StopRecording()
-		fmt.Fprintf(w, "Recording stopped")
-	}))
-
-	http.HandleFunc("/abort-recording", withCORS(func(w http.ResponseWriter, r *http.Request) {
-		taskManager.Abort()
-		fmt.Fprintf(w, "Recording aborted")
 	}))
 
 	http.HandleFunc("/context", withCORS(func(w http.ResponseWriter, r *http.Request) {
