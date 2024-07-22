@@ -112,7 +112,13 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
 						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
-						<td>{{if .Mp3Recording}}<a href="/history/mp3?uuid={{.UUID}}">Recording</a>{{end}}</td>
+						<td>
+							{{if .Mp3Recording}}
+								<audio controls preload="none">
+									<source src="/history/mp3?uuid={{.UUID}}" type="audio/mpeg">
+								</audio>
+							{{end}}
+						</td>
 					</tr>
 				{{end}}
 			</table>
