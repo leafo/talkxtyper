@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 )
@@ -248,6 +250,37 @@ func startServer() {
 		}
 
 		http.Error(w, "MP3 file not found", http.StatusNotFound)
+	}))
+
+	http.HandleFunc("/start-task", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		// if r.Method != http.MethodPost {
+		// 	http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		// 	return
+		// }
+
+		task := taskManager.StartNewTask()
+		<-task.waitForCompletion
+
+		result := task.GetResult()
+
+		if result == nil {
+			http.Error(w, "Task failed to complete", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+	}))
+
+	http.HandleFunc("/stop-task", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		taskManager.StopRecording()
+		log.Println("Task stopped from HTTP API")
+		w.WriteHeader(http.StatusNoContent)
 	}))
 
 	fmt.Printf("Server is starting on http://%s\n", config.ListenAddress)

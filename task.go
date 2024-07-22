@@ -34,11 +34,12 @@ func (tr *TranscriptionResult) String() string {
 
 // NOTE: all methods for this type should be thread safe
 type TranscribeTask struct {
-	stopRecordingCh chan struct{}
-	ctx             context.Context
-	cancel          context.CancelFunc
-	result          *TranscriptionResult
-	mu              sync.Mutex
+	stopRecordingCh   chan struct{}
+	waitForCompletion chan struct{}
+	ctx               context.Context
+	cancel            context.CancelFunc
+	result            *TranscriptionResult
+	mu                sync.Mutex
 }
 
 // TODO: this should take a context
@@ -48,6 +49,14 @@ func NewTranscribeTask() *TranscribeTask {
 		ctx:    ctx,
 		cancel: cancel,
 	}
+}
+
+// WaitForResult blocks until the transcription result is available or the task is aborted.
+func (t *TranscribeTask) WaitForResult() *TranscriptionResult {
+	<-t.ctx.Done()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.result
 }
 
 // stop the recording so that transcription can be started
@@ -80,9 +89,13 @@ func (t *TranscribeTask) SetResult(result *TranscriptionResult) {
 // TODO: this is designed to only be called once, but consider thread safety
 func (t *TranscribeTask) Start() chan TaskState {
 	t.stopRecordingCh = make(chan struct{})
+	t.waitForCompletion = make(chan struct{})
 	stateCh := make(chan TaskState)
 
 	go func() {
+		defer close(t.waitForCompletion)
+		defer close(stateCh)
+
 		stateCh <- TaskStateRecording
 
 		descriptionCh := make(chan string, 1)
@@ -161,14 +174,12 @@ func (t *TranscribeTask) Start() chan TaskState {
 		recordingBuffer, err := recordAudio(t.ctx, t.stopRecordingCh)
 		if err != nil {
 			log.Printf("%v\n", err)
-			close(stateCh)
 			return
 		}
 
 		mp3Path, err := writeRecordingToMP3(recordingBuffer)
 		if err != nil {
 			log.Printf("Error writing MP3 file: %v\n", err)
-			close(stateCh)
 			return
 		}
 		defer os.Remove(mp3Path)
@@ -185,7 +196,6 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		if err != nil {
 			log.Printf("Error transcribing audio: %v\n", err)
-			close(stateCh)
 			return
 		}
 
@@ -203,7 +213,6 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		t.SetResult(transcription)
 		taskManager.AppendToHistory(transcription)
-		close(stateCh)
 	}()
 
 	return stateCh
