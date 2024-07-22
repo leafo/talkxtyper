@@ -29,10 +29,10 @@ func getOpenAIClient() (*openai.Client, error) {
 }
 
 // in my testing the Prompt parameter is not very good at repairing the transcription, so we do a two pass process instead
-func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (TranscriptionResult, error) {
+func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (*TranscriptionResult, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
-		return TranscriptionResult{}, fmt.Errorf("Error initializing OpenAI client: %v", err)
+		return nil, fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
 	// Create a request for transcription
@@ -47,16 +47,18 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 	// Perform the transcription
 	resp, err := client.CreateTranscription(ctx, req)
 	if err != nil {
-		return TranscriptionResult{}, fmt.Errorf("Error sending transcription request: %v", err)
+		return nil, fmt.Errorf("Error sending transcription request: %v", err)
 	}
 
-	result := TranscriptionResult{Original: resp.Text}
+	result := NewTranscriptionResult()
+
+	result.Original = resp.Text
 
 	if instructions != "" {
 		result.RepairPrompt = instructions
 		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
 		if err != nil {
-			return TranscriptionResult{}, fmt.Errorf("Error fixing transcription: %v", err)
+			return nil, fmt.Errorf("Error fixing transcription: %v", err)
 		}
 		result.Modified = fixedText
 	}

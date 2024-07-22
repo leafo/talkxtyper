@@ -100,15 +100,19 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 		{{if .History}}
 			<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
 				<tr>
+					<th>UUID</th>
 					<th>Original</th>
 					<th>Modified</th>
 					<th>Repair Prompt</th>
+					<th>MP3 Recording</th>
 				</tr>
 				{{range .History}}
 					<tr>
+						<td>{{.UUID}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
 						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
+						<td>{{if .Mp3Recording}}<a href="/history/mp3?uuid={{.UUID}}">Recording</a>{{end}}</td>
 					</tr>
 				{{end}}
 			</table>
@@ -225,7 +229,22 @@ func startServer() {
 		}
 	}))
 
-	fmt.Printf("Server is starting on %s\n", config.ListenAddress)
+	http.HandleFunc("/history/mp3", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		uuid := r.URL.Query().Get("uuid")
+
+		history := taskManager.GetHistory()
+		for _, result := range history {
+			if result.UUID == uuid {
+				w.Header().Set("Content-Type", "audio/mpeg")
+				w.Write(result.Mp3Recording)
+				return
+			}
+		}
+
+		http.Error(w, "MP3 file not found", http.StatusNotFound)
+	}))
+
+	fmt.Printf("Server is starting on http://%s\n", config.ListenAddress)
 	err := http.ListenAndServe(config.ListenAddress, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting server: %v\n", err)

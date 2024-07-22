@@ -8,7 +8,11 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+
+	"github.com/google/uuid"
 )
+
+const maxHistoryLength = 100
 
 type TaskState int
 
@@ -20,16 +24,24 @@ const (
 
 type TaskManager struct {
 	currentTask      atomic.Pointer[TranscribeTask]
-	transcriptionRes chan TranscriptionResult
+	transcriptionRes chan *TranscriptionResult
 	stateCh          chan TaskState
 	context          atomic.Pointer[string]
-	history          atomic.Pointer[[]TranscriptionResult]
+	history          atomic.Pointer[[]*TranscriptionResult]
 }
 
 type TranscriptionResult struct {
+	UUID         string
 	Original     string
 	Modified     string
 	RepairPrompt string
+	Mp3Recording []byte `json:"-"`
+}
+
+func NewTranscriptionResult() *TranscriptionResult {
+	return &TranscriptionResult{
+		UUID: uuid.New().String(),
+	}
 }
 
 func (tr *TranscriptionResult) String() string {
@@ -47,10 +59,10 @@ func (tr *TranscriptionResult) IsEmpty() bool {
 // the current task if a new one is started
 var taskManager = TaskManager{
 	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
-	transcriptionRes: make(chan TranscriptionResult),
+	transcriptionRes: make(chan *TranscriptionResult),
 	stateCh:          make(chan TaskState, 10),
 	context:          atomic.Pointer[string]{},
-	history:          atomic.Pointer[[]TranscriptionResult]{},
+	history:          atomic.Pointer[[]*TranscriptionResult]{},
 }
 
 func (tm *TaskManager) StartNewTask() {
@@ -101,7 +113,7 @@ type TranscribeTask struct {
 	stopRecordingCh chan struct{}
 	ctx             context.Context
 	cancel          context.CancelFunc
-	result          TranscriptionResult
+	result          *TranscriptionResult
 	mu              sync.Mutex
 }
 
@@ -110,7 +122,6 @@ func NewTranscribeTask() *TranscribeTask {
 	return &TranscribeTask{
 		ctx:    ctx,
 		cancel: cancel,
-		result: TranscriptionResult{},
 	}
 }
 
@@ -127,13 +138,13 @@ func (t *TranscribeTask) Abort() {
 	t.cancel()
 }
 
-func (t *TranscribeTask) GetResult() TranscriptionResult {
+func (t *TranscribeTask) GetResult() *TranscriptionResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.result
 }
 
-func (t *TranscribeTask) SetResult(result TranscriptionResult) {
+func (t *TranscribeTask) SetResult(result *TranscriptionResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.result = result
@@ -226,13 +237,13 @@ func (t *TranscribeTask) Start() chan TaskState {
 			return
 		}
 
-		mp3FileName, err := writeRecordingToMP3(recordingBuffer)
+		mp3Path, err := writeRecordingToMP3(recordingBuffer)
 		if err != nil {
 			log.Printf("Error writing MP3 file: %v\n", err)
 			close(stateCh)
 			return
 		}
-		defer os.Remove(mp3FileName)
+		defer os.Remove(mp3Path)
 
 		stateCh <- TaskStateTranscribing
 
@@ -242,11 +253,19 @@ func (t *TranscribeTask) Start() chan TaskState {
 			description = d
 		}
 
-		transcription, err := transcribeAudio(t.ctx, mp3FileName, description)
+		transcription, err := transcribeAudio(t.ctx, mp3Path, description)
+
 		if err != nil {
 			log.Printf("Error transcribing audio: %v\n", err)
 			close(stateCh)
 			return
+		}
+
+		mp3Data, err := os.ReadFile(mp3Path)
+		log.Printf("MP3 data size: %d bytes, MP3 path: %s, error: %v\n", len(mp3Data), mp3Path, err)
+
+		if err == nil {
+			transcription.Mp3Recording = mp3Data
 		}
 
 		transcriptionJSON, err := json.Marshal(transcription)
@@ -270,16 +289,19 @@ func (tm *TaskManager) SetContext(ctx string) {
 	tm.context.Store(&ctx)
 }
 
-func (tm *TaskManager) AppendToHistory(entry TranscriptionResult) {
+func (tm *TaskManager) AppendToHistory(entry *TranscriptionResult) {
 	for {
 		oldHistory := tm.history.Load()
 		if oldHistory == nil {
-			newHistory := []TranscriptionResult{entry}
+			newHistory := []*TranscriptionResult{entry}
 			if tm.history.CompareAndSwap(nil, &newHistory) {
 				break
 			}
 		} else {
 			newHistory := append(*oldHistory, entry)
+			if len(newHistory) > maxHistoryLength {
+				newHistory = newHistory[len(newHistory)-maxHistoryLength:]
+			}
 			if tm.history.CompareAndSwap(oldHistory, &newHistory) {
 				break
 			}
@@ -287,10 +309,11 @@ func (tm *TaskManager) AppendToHistory(entry TranscriptionResult) {
 	}
 }
 
-func (tm *TaskManager) GetHistory() []TranscriptionResult {
+// get a copy of the current history
+func (tm *TaskManager) GetHistory() []*TranscriptionResult {
 	history := tm.history.Load()
 	if history == nil {
-		return []TranscriptionResult{}
+		return []*TranscriptionResult{}
 	}
-	return append([]TranscriptionResult(nil), *history...)
+	return append([]*TranscriptionResult(nil), *history...)
 }
