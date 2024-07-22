@@ -7,28 +7,9 @@ import (
 	"log"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"github.com/google/uuid"
 )
-
-const maxHistoryLength = 100
-
-type TaskState int
-
-const (
-	TaskStateIdle TaskState = iota
-	TaskStateRecording
-	TaskStateTranscribing
-)
-
-type TaskManager struct {
-	currentTask      atomic.Pointer[TranscribeTask]
-	transcriptionRes chan *TranscriptionResult
-	stateCh          chan TaskState
-	context          atomic.Pointer[string]
-	history          atomic.Pointer[[]*TranscriptionResult]
-}
 
 type TranscriptionResult struct {
 	UUID         string
@@ -55,60 +36,7 @@ func (tr *TranscriptionResult) IsEmpty() bool {
 	return tr.Original == "" && tr.Modified == ""
 }
 
-// task managers ensures only only one task is running at a time and cancels
-// the current task if a new one is started
-var taskManager = TaskManager{
-	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
-	transcriptionRes: make(chan *TranscriptionResult),
-	stateCh:          make(chan TaskState, 10),
-	context:          atomic.Pointer[string]{},
-	history:          atomic.Pointer[[]*TranscriptionResult]{},
-}
-
-func (tm *TaskManager) StartNewTask() {
-	newTask := NewTranscribeTask()
-
-	oldTask := tm.currentTask.Swap(newTask)
-	if oldTask != nil {
-		oldTask.Abort()
-	}
-
-	stateCh := newTask.Start()
-
-	go func() {
-		for state := range stateCh {
-			tm.stateCh <- state
-		}
-
-		tm.stateCh <- TaskStateIdle
-		tm.currentTask.CompareAndSwap(newTask, nil)
-
-		if result := newTask.GetResult(); !result.IsEmpty() {
-			tm.transcriptionRes <- result
-		}
-	}()
-}
-
-func (tm *TaskManager) StartOrStopTask() {
-	if currentTask := tm.currentTask.Load(); currentTask != nil {
-		tm.StopRecording()
-	} else {
-		tm.StartNewTask()
-	}
-}
-
-func (tm *TaskManager) StopRecording() {
-	if currentTask := tm.currentTask.Load(); currentTask != nil {
-		currentTask.StopRecording()
-	}
-}
-
-func (tm *TaskManager) Abort() {
-	if currentTask := tm.currentTask.Load(); currentTask != nil {
-		currentTask.Abort()
-	}
-}
-
+// NOTE: all methods for this type should be thread safe
 type TranscribeTask struct {
 	stopRecordingCh chan struct{}
 	ctx             context.Context
@@ -127,6 +55,8 @@ func NewTranscribeTask() *TranscribeTask {
 
 // stop the recording so that transcription can be started
 func (t *TranscribeTask) StopRecording() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.stopRecordingCh != nil {
 		close(t.stopRecordingCh)
 		t.stopRecordingCh = nil
@@ -150,6 +80,7 @@ func (t *TranscribeTask) SetResult(result *TranscriptionResult) {
 	t.result = result
 }
 
+// TODO: this is designed to only be called once, but consider thread safety
 func (t *TranscribeTask) Start() chan TaskState {
 	t.stopRecordingCh = make(chan struct{})
 	stateCh := make(chan TaskState)
@@ -279,41 +210,4 @@ func (t *TranscribeTask) Start() chan TaskState {
 	}()
 
 	return stateCh
-}
-
-func (tm *TaskManager) GetContext() string {
-	return *tm.context.Load()
-}
-
-func (tm *TaskManager) SetContext(ctx string) {
-	tm.context.Store(&ctx)
-}
-
-func (tm *TaskManager) AppendToHistory(entry *TranscriptionResult) {
-	for {
-		oldHistory := tm.history.Load()
-		if oldHistory == nil {
-			newHistory := []*TranscriptionResult{entry}
-			if tm.history.CompareAndSwap(nil, &newHistory) {
-				break
-			}
-		} else {
-			newHistory := append(*oldHistory, entry)
-			if len(newHistory) > maxHistoryLength {
-				newHistory = newHistory[len(newHistory)-maxHistoryLength:]
-			}
-			if tm.history.CompareAndSwap(oldHistory, &newHistory) {
-				break
-			}
-		}
-	}
-}
-
-// get a copy of the current history
-func (tm *TaskManager) GetHistory() []*TranscriptionResult {
-	history := tm.history.Load()
-	if history == nil {
-		return []*TranscriptionResult{}
-	}
-	return append([]*TranscriptionResult(nil), *history...)
 }
