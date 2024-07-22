@@ -233,6 +233,12 @@ func startServer() {
 	}))
 
 	http.HandleFunc("/start-task", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		// if r.Method != http.MethodPost {
 		// 	http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		// 	return
@@ -253,6 +259,12 @@ func startServer() {
 	}))
 
 	http.HandleFunc("/stop-task", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 			return
