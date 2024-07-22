@@ -51,14 +51,6 @@ func NewTranscribeTask() *TranscribeTask {
 	}
 }
 
-// WaitForResult blocks until the transcription result is available or the task is aborted.
-func (t *TranscribeTask) WaitForResult() *TranscriptionResult {
-	<-t.ctx.Done()
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.result
-}
-
 // stop the recording so that transcription can be started
 func (t *TranscribeTask) StopRecording() {
 	t.mu.Lock()

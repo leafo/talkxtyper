@@ -35,8 +35,10 @@ func (tm *TaskManager) StartNewTask() *TranscribeTask {
 	newTask := NewTranscribeTask()
 
 	oldTask := tm.currentTask.Swap(newTask)
+
 	if oldTask != nil {
 		oldTask.Abort()
+		<-oldTask.waitForCompletion
 	}
 
 	stateCh := newTask.Start()
@@ -48,7 +50,6 @@ func (tm *TaskManager) StartNewTask() *TranscribeTask {
 		}
 
 		tm.stateCh <- TaskStateIdle
-		// either publish the result to the task listener or send it to task manager
 
 		if tm.currentTask.CompareAndSwap(newTask, nil) {
 			if result := newTask.GetResult(); result != nil {
