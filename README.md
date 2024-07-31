@@ -18,27 +18,23 @@ variable" instead of the symbol on the screen.
 ### Attempts
 
 1. **Send screenshot of desktop to to gpt-4o**
-   My first attempt was to take a screenshot of the desktop while the audio was
-   recording and send that to GPT-4 to ask it to extract relevant textual
-   features from the image. The result would be sent alongside the prompt to
-   another call to ChatGPT to fix up the transcription to try to rewrite things
-   to match the user's intent. I considered this a failed attempt because the
-   initial ChatGPT call with the screenshot took much longer than the recording
-   and processing by the Whisper API, so you would end up waiting a bit for the
-   result. The returned words were sparse and may not have been relevant to the
-   user.
+   - [*] Idea: take and send screenshot of the desktop while audio is being recorded,
+   send image to gpt-4o to ask it to extract relevant textual features from the
+   image. Combine the extracted information with the whisper output to attempt
+   to fix the transcription to match text on the screen.
+   Resut: gpt-4o with vision is too slow, it makes the typing experience too slow
+   - [ ] Use Claude Sonnet 3.5, it appears to be much faster with image processing
 
 2. **Using the `prompt` parameter with Whisper API**
-   The prompt parameter produces poor results. According to the documentation,
-   it has limited support for controlling how the transcription and support a
-   relatively small max size. If any fixups need to take place, they will need
-   to be done with a subsequent call to ChatGPT. Luckily, GPT-4 is fast enough
-   that the delay does not ruin the experience.
+   The whisper API includes a `prompt` parameter that can be used for basic
+   instruction during transcription. The results were poor and the max size is
+   short. Haven't found a use for it
 
 3. **Extract text from running app**
-   My next attempt was to extract the textual context from the running app. To
-   start with, I used the `nvim` remote API to run commands on my nvim session to
-   pull out the text currently being edited.
+   Idea: Query what the currently focused app is, then have custom code to
+   extract the text from the screen.
+   - [*] Implement text extraction from nvim using the `nvim` remote API
+   - [ ] Explore extracting text from browser. (Consider a browser extension)
 
 ## Configuration
 
@@ -50,6 +46,23 @@ configuration directory. The file is named `talkxtyper-config.json`.
 - `OpenAIKey`: Your API key for the OpenAI Whisper API.
 - `IncludeScreen`: A boolean value indicating whether to analyze the screen to augment the transcription. The config file will be updated automatically if you change this value in the program.
 - `IncludeNvim`: A boolean value indicating whether to analyze the screen to augment the transcription.
+
+## Web interface
+
+`ListenAddress` can be specified in the config file to enable the web
+interface. The web interface includes some experimental functionality. The web
+interface is not enabled by default.
+
+Eg. Setting `ListenAddress` to `"localhost:9898"` will make the web interface
+accessible at `http://localhost:9898`.
+
+SECURITY NOTE: The web interface adds a HTTP API for controlling recording and
+transcribing, in addition to taking screenshots of the desktop. Don't leave it
+running if you don't need it.
+
+The web interface exposes a way to review transcription history via `/history`
+and listen to the audio files that were recorded. You can use this to debug if
+recording is working as expected.
 
 ## Installation
 
