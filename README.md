@@ -18,11 +18,11 @@ variable" instead of the symbol on the screen.
 ### Attempts
 
 1. **Send screenshot of desktop to to gpt-4o**
-   - [*] Idea: take and send screenshot of the desktop while audio is being recorded,
+   - [x] Idea: take and send screenshot of the desktop while audio is being recorded,
    send image to gpt-4o to ask it to extract relevant textual features from the
    image. Combine the extracted information with the whisper output to attempt
    to fix the transcription to match text on the screen.
-   Resut: gpt-4o with vision is too slow, it makes the typing experience too slow
+     - Resut: gpt-4o with vision is too slow, it makes the typing experience too slow
    - [ ] Use Claude Sonnet 3.5, it appears to be much faster with image processing
 
 2. **Using the `prompt` parameter with Whisper API**
@@ -33,7 +33,7 @@ variable" instead of the symbol on the screen.
 3. **Extract text from running app**
    Idea: Query what the currently focused app is, then have custom code to
    extract the text from the screen.
-   - [*] Implement text extraction from nvim using the `nvim` remote API
+   - [x] Implement text extraction from nvim using the `nvim` remote API
    - [ ] Explore extracting text from browser. (Consider a browser extension)
 
 ## Configuration
