@@ -102,7 +102,11 @@ func oneShotMode() {
 	log.SetOutput(os.Stderr)
 	readConfig()
 
-	log.Println("Now recording... (Press Ctrl+C to stop)")
+	// force disable any transcription fixing
+	config.IncludeScreen = false
+	config.IncludeNvim = false
+
+	log.Println("Now recording... (Press Ctrl+C or ESC to stop)")
 
 	stopHotkey := hotkey.New(nil, hotkey.KeyEscape)
 
@@ -137,7 +141,7 @@ func oneShotMode() {
 			}
 		}()
 
-		taskManager.StartOrStopTask()
+		taskManager.StartNewTask()
 
 		// Listen for CTRL-C to stop the task
 		c := make(chan os.Signal, 1)
