@@ -16,6 +16,7 @@ import (
 const sampleRate = 44100
 const bufferSize = 256
 const maxRecordSeconds = 30
+const minRecordSeconds = 1
 const debug = false
 
 func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
@@ -57,6 +58,8 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	}
 	defer stream.Close()
 
+	startTime := time.Now()
+
 	if err := stream.Start(); err != nil {
 		return nil, fmt.Errorf("Error starting stream: %v", err)
 	}
@@ -70,6 +73,10 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	case <-ctx.Done():
 		stream.Stop()
 		return nil, fmt.Errorf("Recording cancelled")
+	}
+
+	if time.Since(startTime) < minRecordSeconds*time.Second {
+		return nil, fmt.Errorf("Aborting, recording too short: < %d seconds", minRecordSeconds)
 	}
 
 	return recordingBuffer, nil
