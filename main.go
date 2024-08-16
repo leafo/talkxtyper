@@ -134,11 +134,11 @@ func onReady() {
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
 	// setup hotkeys
-	listen1 := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
-	listen1.Register()
+	toggleHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
+	toggleHotkey.Register()
 
-	listen2 := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
-	listen2.Register()
+	abortHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
+	abortHotkey.Register()
 
 	go func() {
 		for {
@@ -163,10 +163,10 @@ func onReady() {
 			case transcription := <-taskManager.transcriptionRes:
 				typeString(transcription.String())
 
-			case <-listen1.Keydown():
+			case <-toggleHotkey.Keydown():
 				taskManager.StartOrStopTask()
 
-			case <-listen2.Keydown():
+			case <-abortHotkey.Keydown():
 				taskManager.Abort()
 
 			case <-mRecord.ClickedCh:
