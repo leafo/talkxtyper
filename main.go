@@ -71,12 +71,12 @@ func main() {
 		return
 	}
 
-	readConfig()
-
 	if *oneShot {
 		oneShotMode()
 		return
 	}
+
+	readConfig()
 
 	if *reportScreen {
 		description, err := describeScreen(context.Background())
@@ -99,24 +99,73 @@ func main() {
 }
 
 func oneShotMode() {
+	log.SetOutput(os.Stderr)
+	readConfig()
+
 	log.Println("Now recording... (Press Ctrl+C to stop)")
-	taskManager.StartOrStopTask()
 
-	// Listen for CTRL-C to stop the task
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt)
-	<-c
+	stopHotkey := hotkey.New(nil, hotkey.KeyEscape)
 
-	log.Println("Stopping recording...")
-	taskManager.StopRecording()
+	systray.Run(func() {
+		systray.SetIcon(icon_blue)
+		systray.SetTitle(DEFAULT_TITLE)
+		systray.SetTooltip("Ready")
 
-	log.Println("Waiting for transcription...")
-	select {
-	case transcription := <-taskManager.transcriptionRes:
-		fmt.Println(transcription)
-	case <-c:
-		log.Println("CTRL-C received")
-	}
+		mAbort := systray.AddMenuItem("Abort", "Cancel operation and don't return anything")
+
+		stopHotkey.Register()
+
+		taskManager.StartOrStopTask()
+
+		// Listen for CTRL-C to stop the task
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+
+		go func() {
+			for {
+				select {
+				case state := <-taskManager.stateCh:
+					switch state {
+					case TaskStateRecording:
+						systray.SetIcon(icon_red)
+						systray.SetTitle("Recording")
+						systray.SetTooltip("Recording audio...")
+					case TaskStateTranscribing:
+						systray.SetTooltip("Transcribing audio...")
+						systray.SetIcon(icon_green)
+					default:
+						systray.SetTooltip("Ready")
+						systray.SetIcon(icon_blue)
+					}
+				case <-mAbort.ClickedCh:
+					systray.Quit()
+				}
+			}
+		}()
+
+		select {
+		case <-c:
+			break
+		case <-stopHotkey.Keydown():
+			stopHotkey.Unregister()
+			break
+		}
+
+		log.Println("Stopping recording...")
+		taskManager.StopRecording()
+
+		log.Println("Waiting for transcription...")
+		select {
+		case transcription := <-taskManager.transcriptionRes:
+			fmt.Println(transcription)
+		case <-c:
+			log.Println("CTRL-C received")
+		}
+
+		systray.Quit()
+	}, func() {
+		log.Println("Exiting...")
+	})
 }
 
 func onReady() {

@@ -26,7 +26,7 @@ type TaskManager struct {
 var taskManager = TaskManager{
 	currentTask:      atomic.Pointer[TranscribeTask]{}, // Initialize as nil
 	transcriptionRes: make(chan *TranscriptionResult),
-	stateCh:          make(chan TaskState, 10),
+	stateCh:          make(chan TaskState, 128),
 	context:          atomic.Pointer[string]{},
 	history:          atomic.Pointer[[]*TranscriptionResult]{},
 }

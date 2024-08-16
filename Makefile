@@ -8,6 +8,9 @@ GO_FILES := $(PNG_FILES:.png=.go)
 run:
 	go run *.go
 
+oneshot:
+	go run *.go -one-shot
+
 build:
 	go build -o talkxtyper *.go
 
@@ -26,5 +29,5 @@ install:
 	go install ./...
 
 
-.PHONY: all clean run
+.PHONY: all clean run oneshot
 
