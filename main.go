@@ -115,12 +115,6 @@ func oneShotMode() {
 
 		stopHotkey.Register()
 
-		taskManager.StartOrStopTask()
-
-		// Listen for CTRL-C to stop the task
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-
 		go func() {
 			for {
 				select {
@@ -142,6 +136,12 @@ func oneShotMode() {
 				}
 			}
 		}()
+
+		taskManager.StartOrStopTask()
+
+		// Listen for CTRL-C to stop the task
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
 
 		select {
 		case <-c:
