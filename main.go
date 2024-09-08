@@ -22,6 +22,7 @@ func main() {
 	oneShot := flag.Bool("one-shot", false, "Run the record task blocking in console, don't start any background systems")
 	reportScreen := flag.Bool("report-screen", false, "Test screen description system, and exit")
 	audioDevices := flag.Bool("audio-devices", false, "Print out all audio devices and exit")
+	transcribeFname := flag.String("transcribe", "", "Transcribe audio from the specified file")
 
 	flag.Parse()
 
@@ -77,6 +78,18 @@ func main() {
 	}
 
 	readConfig()
+
+	if *transcribeFname != "" {
+		// read an audio file and send it to whisper api for transcription
+		transcription, err := transcribeAudio(context.Background(), *transcribeFname, "")
+		if err != nil {
+			log.Fatalf("Error transcribing file: %v", err)
+		}
+
+		fmt.Println("Transcription result:", transcription.String())
+
+		return
+	}
 
 	if *reportScreen {
 		description, err := describeScreen(context.Background())
