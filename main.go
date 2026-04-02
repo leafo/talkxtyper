@@ -201,10 +201,18 @@ func onReady() {
 
 	// setup hotkeys
 	toggleHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
-	toggleHotkey.Register()
+	if err := toggleHotkey.Register(); err != nil {
+		log.Printf("Failed to register toggle hotkey: %v", err)
+	} else {
+		log.Println("Toggle recording: Alt+B")
+	}
 
 	abortHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
-	abortHotkey.Register()
+	if err := abortHotkey.Register(); err != nil {
+		log.Printf("Failed to register abort hotkey: %v", err)
+	} else {
+		log.Println("Abort recording: Alt+C")
+	}
 
 	go func() {
 		for {

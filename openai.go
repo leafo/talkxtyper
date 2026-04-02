@@ -88,7 +88,7 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 	}
 
 	req := openai.ChatCompletionRequest{
-		Model:     "gpt-4o",
+		Model:     config.ChatModel,
 		Messages:  messages,
 		MaxTokens: 1024,
 	}
@@ -141,7 +141,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 
 	// Create a request for image description
 	req := openai.ChatCompletionRequest{
-		Model:    "gpt-4o",
+		Model:    config.ChatModel,
 		Messages: messages,
 	}
 

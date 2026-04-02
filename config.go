@@ -9,13 +9,15 @@ import (
 )
 
 type Config struct {
-	OpenAIKey     string
+	OpenAIKey string
+	ChatModel string
 	IncludeScreen bool
 	IncludeNvim   bool
 	ListenAddress string
 }
 
 var config = Config{
+	ChatModel: "gpt-5.4-mini",
 	// ListenAddress: "localhost:9898",
 	// IncludeScreen: true,
 	// IncludeNvim: true,
