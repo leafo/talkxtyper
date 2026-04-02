@@ -197,7 +197,7 @@ func startServer() {
 			nvimContext, nvimError = nvimClient.GetInsertionText("<<CURSOR>>")
 		}
 
-		err = nvimPageTemplate.Execute(w, map[string]interface{}{
+		err = nvimPageTemplate.Execute(w, map[string]any{
 			"Command": command,
 			"Context": nvimContext,
 			"Error":   nvimError,
@@ -211,7 +211,7 @@ func startServer() {
 	http.HandleFunc("/history", withCORS(func(w http.ResponseWriter, r *http.Request) {
 		history := taskManager.GetHistory()
 
-		err := historyPageTemplate.Execute(w, map[string]interface{}{"History": history})
+		err := historyPageTemplate.Execute(w, map[string]any{"History": history})
 		if err != nil {
 			http.Error(w, "Error rendering template", http.StatusInternalServerError)
 		}

@@ -154,9 +154,9 @@ func (client *NvimClient) FindActiveNvim() error {
 		if err != nil {
 			return "", err
 		}
-		childPids := strings.Split(strings.TrimSpace(string(output)), "\n")
+		childPids := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
 
-		for _, childPid := range childPids {
+		for childPid := range childPids {
 			socketFile, err = searchPid(childPid)
 			if err == nil {
 				return socketFile, nil
@@ -226,7 +226,7 @@ func (client *NvimClient) RemoteExecuteLua(command string) (string, error) {
 // Returns the text in nvim surrounding the cursor when in insertion mode
 func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
 	var insertionTextCmd strings.Builder
-	err := getInsertionTextCmd.Execute(&insertionTextCmd, map[string]interface{}{
+	err := getInsertionTextCmd.Execute(&insertionTextCmd, map[string]any{
 		"NumLines": 20,
 		"Sigil":    cursorSigil,
 	})
@@ -245,7 +245,7 @@ func (client *NvimClient) GetInsertionText(cursorSigil string) (string, error) {
 // Returns all the visible text in the current nvim window
 func (client *NvimClient) GetVisibleText() (string, error) {
 	var visibleTextCmd strings.Builder
-	err := getVisibleTextCmd.Execute(&visibleTextCmd, map[string]interface{}{
+	err := getVisibleTextCmd.Execute(&visibleTextCmd, map[string]any{
 		"ContextExtend": 20,
 	})
 
