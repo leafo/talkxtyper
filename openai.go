@@ -90,7 +90,7 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 	req := openai.ChatCompletionRequest{
 		Model:     config.ChatModel,
 		Messages:  messages,
-		MaxTokens: 1024,
+		MaxCompletionTokens: 1024,
 	}
 
 	// log.Printf("ChatCompletion for fixing transcription: %+v\n", req)
