@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -30,9 +29,12 @@ func describeScreen(ctx context.Context) (string, error) {
 
 // capture a screenshot of the display and save it to a temporary file
 func takeScreenshot() (string, error) {
-	image := robotgo.CaptureImg()
+	image, err := robotgo.CaptureImg()
+	if err != nil {
+		return "", fmt.Errorf("Error capturing screen: %v", err)
+	}
 
-	tempFile, err := ioutil.TempFile("", fmt.Sprintf("talkxtyper-%d-*.png", time.Now().Unix()))
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("talkxtyper-%d-*.png", time.Now().Unix()))
 	if err != nil {
 		return "", fmt.Errorf("Error creating temporary file: %v", err)
 	}
