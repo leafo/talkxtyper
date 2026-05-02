@@ -56,6 +56,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 
 	if instructions != "" {
 		result.RepairPrompt = instructions
+		result.RepairModel = config.ChatModel
 		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
 		if err != nil {
 			return nil, fmt.Errorf("Error fixing transcription: %v", err)

@@ -22,6 +22,7 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 			<li><a href="/context">Context</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
 			<li><a href="/nvim">nvim Remote</a></li>
+			<li><a href="/tmux">tmux Panes</a></li>
 			<li><a href="/history">History</a></li>
 		</ul>
 	</body>
@@ -146,6 +147,92 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 	</html>
 `))
 
+var tmuxListPageTemplate = template.Must(template.New("tmuxList").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>tmux Panes</title>
+	</head>
+	<body>
+		<h1>tmux panes</h1>
+		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
+		{{if .Panes}}
+			<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+				<tr>
+					<th>Session</th>
+					<th>Window</th>
+					<th>Pane</th>
+					<th>Command</th>
+					<th>PID</th>
+					<th>Active</th>
+					<th></th>
+				</tr>
+				{{range .Panes}}
+					<tr>
+						<td>{{.SessionName}}</td>
+						<td>{{.WindowIndex}}: {{.WindowName}}</td>
+						<td>{{.PaneIndex}} ({{.PaneID}})</td>
+						<td>{{.CurrentCommand}}</td>
+						<td>{{.PanePid}}</td>
+						<td>{{if .Active}}yes{{end}}</td>
+						<td><a href="/tmux?pane={{.PaneID}}">Open</a></td>
+					</tr>
+				{{end}}
+			</table>
+		{{else}}
+			<p>No tmux panes found</p>
+		{{end}}
+	</body>
+	</html>
+`))
+
+var tmuxPanePageTemplate = template.Must(template.New("tmuxPane").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>tmux pane {{.PaneID}}</title>
+	</head>
+	<body>
+		<h1>tmux pane {{.PaneID}}{{if .PaneInfo}} ({{.PaneInfo}}){{end}}</h1>
+		<p>
+			<a href="/tmux">&larr; All panes</a>
+			&nbsp;|&nbsp;
+			Auto refresh:
+			{{if .Refresh}}
+				<b>on</b> (<a href="/tmux?pane={{.PaneID}}&view={{.View}}">turn off</a>)
+			{{else}}
+				<b>off</b> (<a href="/tmux?pane={{.PaneID}}&view={{.View}}&refresh=on">turn on</a>)
+			{{end}}
+		</p>
+		<dl>
+			<dt><a href="/tmux?pane={{.PaneID}}&view=visible{{if .Refresh}}&refresh=on{{end}}">Visible buffer</a>{{if eq .View "visible"}} &mdash; current{{end}}</dt>
+			<dd>What's currently on screen in this pane.</dd>
+
+			<dt><a href="/tmux?pane={{.PaneID}}&view=history{{if .Refresh}}&refresh=on{{end}}">Buffer with scrollback</a>{{if eq .View "history"}} &mdash; current{{end}}</dt>
+			<dd>Visible region plus 200 lines of scrollback.</dd>
+
+			<dt><a href="/tmux?pane={{.PaneID}}&view=preview{{if .Refresh}}&refresh=on{{end}}">Prompt preview</a>{{if eq .View "preview"}} &mdash; current{{end}}</dt>
+			<dd>Exact prompt fragment transcription would receive (visible buffer wrapped).</dd>
+		</dl>
+		<h2>{{.ViewLabel}}</h2>
+		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
+		<pre>{{.Context}}</pre>
+		<script>
+			(function() {
+				const urlParams = new URLSearchParams(window.location.search);
+				if (urlParams.get('refresh')) {
+					setInterval(function() {
+						if (!document.activeElement || (document.activeElement.tagName !== "TEXTAREA" && document.activeElement.tagName !== "INPUT")) {
+							location.reload();
+						}
+					}, 1000);
+				}
+			})();
+		</script>
+	</body>
+	</html>
+`))
+
 var historyPageTemplate = template.Must(template.New("history").Parse(`
 	<!DOCTYPE html>
 	<html>
@@ -160,6 +247,7 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 					<th>UUID</th>
 					<th>Original</th>
 					<th>Modified</th>
+					<th>Repair Model</th>
 					<th>Repair Prompt</th>
 					<th>MP3 Recording</th>
 				</tr>
@@ -168,6 +256,7 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 						<td>{{.UUID}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
+						<td>{{.RepairModel}}</td>
 						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
 						<td>
 							{{if .Mp3Recording}}
@@ -309,6 +398,104 @@ func startServer() {
 			"ViewLabel": viewLabel,
 		})
 
+		if err != nil {
+			http.Error(w, "Error rendering template", http.StatusInternalServerError)
+		}
+	}))
+
+	http.HandleFunc("/tmux", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		paneID := r.URL.Query().Get("pane")
+
+		if paneID == "" {
+			panes, listErr := ListTmuxPanes()
+			activePane, _ := FindActiveTmuxPane()
+			activeID := ""
+			if activePane != nil {
+				activeID = activePane.PaneID
+			}
+
+			type paneRow struct {
+				SessionName    string
+				WindowIndex    string
+				WindowName     string
+				PaneIndex      string
+				PaneID         string
+				PanePid        string
+				CurrentCommand string
+				Active         bool
+			}
+			rows := make([]paneRow, 0, len(panes))
+			for _, p := range panes {
+				rows = append(rows, paneRow{
+					SessionName:    p.SessionName,
+					WindowIndex:    p.WindowIndex,
+					WindowName:     p.WindowName,
+					PaneIndex:      p.PaneIndex,
+					PaneID:         p.PaneID,
+					PanePid:        p.PanePid,
+					CurrentCommand: p.CurrentCommand,
+					Active:         activeID != "" && p.PaneID == activeID,
+				})
+			}
+
+			err := tmuxListPageTemplate.Execute(w, map[string]any{
+				"Panes": rows,
+				"Error": listErr,
+			})
+			if err != nil {
+				http.Error(w, "Error rendering template", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		view := r.URL.Query().Get("view")
+		refresh := r.URL.Query().Get("refresh") != ""
+
+		var content string
+		var contentErr error
+		var viewLabel string
+		var paneInfo string
+
+		// look up pane metadata once for the header and the preview view
+		var pane *TmuxPane
+		if panes, err := ListTmuxPanes(); err == nil {
+			for i := range panes {
+				if panes[i].PaneID == paneID {
+					pane = &panes[i]
+					break
+				}
+			}
+		}
+		if pane != nil {
+			paneInfo = fmt.Sprintf("%s:%s.%s %s", pane.SessionName, pane.WindowIndex, pane.PaneIndex, pane.CurrentCommand)
+		}
+
+		switch view {
+		case "history":
+			viewLabel = "Buffer + 200 lines scrollback"
+			content, contentErr = CapturePane(paneID, 200)
+		case "preview":
+			viewLabel = "Prompt preview (what transcription would receive)"
+			if pane == nil {
+				contentErr = fmt.Errorf("pane %s not found", paneID)
+			} else {
+				content, contentErr = pane.BuildTranscriptionContext()
+			}
+		default:
+			view = "visible"
+			viewLabel = "Visible buffer"
+			content, contentErr = CapturePane(paneID, 0)
+		}
+
+		err := tmuxPanePageTemplate.Execute(w, map[string]any{
+			"PaneID":    paneID,
+			"PaneInfo":  paneInfo,
+			"View":      view,
+			"Refresh":   refresh,
+			"Context":   content,
+			"Error":     contentErr,
+			"ViewLabel": viewLabel,
+		})
 		if err != nil {
 			http.Error(w, "Error rendering template", http.StatusInternalServerError)
 		}

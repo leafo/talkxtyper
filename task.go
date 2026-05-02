@@ -16,6 +16,7 @@ type TranscriptionResult struct {
 	Original     string
 	Modified     string
 	RepairPrompt string
+	RepairModel  string
 	Mp3Recording []byte `json:"-"`
 }
 
@@ -92,42 +93,51 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		descriptionCh := make(chan string, 1)
 
-		if config.IncludeScreen {
-			go func() {
-				defer close(descriptionCh)
+		// Priority order: screen > nvim > tmux. Screen wins outright when
+		// enabled (it always works). Otherwise nvim is tried first; if it has
+		// no active instance, fall through to tmux.
+		go func() {
+			defer close(descriptionCh)
+
+			if config.IncludeScreen {
 				description, err := describeScreen(t.ctx)
 				if err != nil {
 					log.Printf("Error describing screen: %v\n", err)
 					return
 				}
 				log.Printf("Screen Description: %s\n", description)
-
 				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
 				descriptionCh <- description
-			}()
-		} else if config.IncludeNvim {
-			go func() {
-				defer close(descriptionCh)
+				return
+			}
+
+			if config.IncludeNvim {
 				nvimClient := NewNvimClient()
 				if err := nvimClient.FindActiveNvim(); err != nil {
 					log.Printf("nvim: %v", err)
-					return
+				} else {
+					log.Printf("Using nvim socket: %s", nvimClient.socketFile)
+					context, err := nvimClient.BuildTranscriptionContext()
+					if err != nil {
+						log.Printf("nvim context: %v", err)
+					} else {
+						log.Printf("nvim context: %s", context)
+						descriptionCh <- context
+						return
+					}
 				}
+			}
 
-				log.Printf("Using nvim socket: %s", nvimClient.socketFile)
-
-				context, err := nvimClient.BuildTranscriptionContext()
+			if config.IncludeTmux {
+				context, err := BuildTmuxTranscriptionContext()
 				if err != nil {
-					log.Printf("nvim context: %v", err)
+					log.Printf("tmux: %v", err)
 					return
 				}
-
-				log.Printf("nvim context: %s", context)
+				log.Printf("tmux context: %s", context)
 				descriptionCh <- context
-			}()
-		} else {
-			close(descriptionCh)
-		}
+			}
+		}()
 
 		recordingBuffer, err := recordAudio(t.ctx, t.stopRecordingCh)
 		if err != nil {

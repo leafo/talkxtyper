@@ -9,10 +9,11 @@ import (
 )
 
 type Config struct {
-	OpenAIKey string
-	ChatModel string
+	OpenAIKey     string
+	ChatModel     string
 	IncludeScreen bool
 	IncludeNvim   bool
+	IncludeTmux   bool
 	ListenAddress string
 }
 

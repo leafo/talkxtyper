@@ -192,26 +192,14 @@ func onReady() {
 	systray.SetTitle(DEFAULT_TITLE)
 	systray.SetTooltip("Ready")
 
-	mRecord := systray.AddMenuItem("Record and Transcribe", "Start recording and transcribing")
-	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
-	mAbort.Hide()
-
-	mIncludeScreen := systray.AddMenuItemCheckbox("Include screen", "Analyze the screen to augment the transcription", config.IncludeScreen)
-	mIncludeNvim := systray.AddMenuItemCheckbox("Include nvim", "Include text from current nvim viewport in the transcription", config.IncludeNvim)
-
-	var mOpenHTTP *systray.MenuItem
-	if config.ListenAddress != "" {
-		mOpenHTTP = systray.AddMenuItem("Open HTTP interface", "Open the HTTP interface in a browser")
-	}
-
-	mExit := systray.AddMenuItem("Exit", "Exit the application")
-
-	// setup hotkeys
+	// Register hotkeys first so menu titles can reflect them.
 	toggleHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
+	recordHotkeyLabel := ""
 	if err := toggleHotkey.Register(); err != nil {
 		log.Printf("Failed to register toggle hotkey: %v", err)
 	} else {
 		log.Println("Toggle recording: Alt+B")
+		recordHotkeyLabel = " (Alt+B)"
 	}
 
 	abortHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
@@ -220,6 +208,21 @@ func onReady() {
 	} else {
 		log.Println("Abort recording: Alt+C")
 	}
+
+	mRecord := systray.AddMenuItem("Record and Transcribe"+recordHotkeyLabel, "Start recording and transcribing")
+	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
+	mAbort.Hide()
+
+	mIncludeScreen := systray.AddMenuItemCheckbox("1. Include screen", "Highest priority. Sends a screenshot description; skips nvim/tmux when enabled.", config.IncludeScreen)
+	mIncludeNvim := systray.AddMenuItemCheckbox("2. Include nvim", "Tried before tmux. Falls through to tmux if no active nvim is found.", config.IncludeNvim)
+	mIncludeTmux := systray.AddMenuItemCheckbox("3. Include tmux", "Lowest priority. Used only if screen is off and nvim is off or unavailable.", config.IncludeTmux)
+
+	var mOpenHTTP *systray.MenuItem
+	if config.ListenAddress != "" {
+		mOpenHTTP = systray.AddMenuItem("Open HTTP interface", "Open the HTTP interface in a browser")
+	}
+
+	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
 	var openHTTPCh chan struct{}
 	if mOpenHTTP != nil {
@@ -234,7 +237,7 @@ func onReady() {
 				case TaskStateRecording:
 					systray.SetIcon(icon_red)
 					systray.SetTooltip("Recording audio...")
-					mRecord.SetTitle("Stop recording")
+					mRecord.SetTitle("Stop recording" + recordHotkeyLabel)
 					mAbort.Show()
 				case TaskStateTranscribing:
 					systray.SetTooltip("Transcribing audio...")
@@ -242,7 +245,7 @@ func onReady() {
 				default:
 					systray.SetTooltip("Ready")
 					systray.SetIcon(icon_blue)
-					mRecord.SetTitle("Record and Transcribe")
+					mRecord.SetTitle("Record and Transcribe" + recordHotkeyLabel)
 					mAbort.Hide()
 				}
 
@@ -281,6 +284,19 @@ func onReady() {
 				}
 
 				config.IncludeNvim = mIncludeNvim.Checked()
+
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
+
+			case <-mIncludeTmux.ClickedCh:
+				if mIncludeTmux.Checked() {
+					mIncludeTmux.Uncheck()
+				} else {
+					mIncludeTmux.Check()
+				}
+
+				config.IncludeTmux = mIncludeTmux.Checked()
 
 				if err := writeConfig(); err != nil {
 					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
