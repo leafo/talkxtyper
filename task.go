@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -106,7 +105,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 					return
 				}
 				log.Printf("Screen Description: %s\n", description)
-				description = fmt.Sprintf(description, "\nPlease use the information about the user's screen to aid to transcribing the audio")
+				description = description + "\nPlease use the information about the user's screen to aid in transcribing the audio"
 				descriptionCh <- description
 				return
 			}

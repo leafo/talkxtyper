@@ -10,9 +10,9 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-var fixPrompt = `You are an voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's screen and fixes the transcription to be what the user likely intended to type.
+var fixPrompt = `You are a voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's current environment (e.g. their active editor buffer, terminal pane, or screen) and fixes the transcription to be what the user likely intended to type.
 
-You will output only the updated transcription and no other text. Do not output information not spoken in the original transcription.`
+You will output only the updated transcription and no other text. Do not output information not spoken in the original transcription. If the transcription is already correct or the context isn't relevant, return the transcription unchanged.`
 
 // tests:
 // The transcription was generated from spoken words and may contain errors. Please use the text provided to identify and correct any inaccuracies, focusing on misheard words, technical terms, or any context-specific discrepancies.
@@ -80,7 +80,7 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 		},
 		{
 			Role:    "user",
-			Content: instructions,
+			Content: fmt.Sprintf("Context: %s", instructions),
 		},
 		{
 			Role:    "user",
