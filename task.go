@@ -110,54 +110,20 @@ func (t *TranscribeTask) Start() chan TaskState {
 				defer close(descriptionCh)
 				nvimClient := NewNvimClient()
 				if err := nvimClient.FindActiveNvim(); err != nil {
-					log.Printf("nivm: %v", err)
+					log.Printf("nvim: %v", err)
 					return
 				}
 
 				log.Printf("Using nvim socket: %s", nvimClient.socketFile)
 
-				var visibleText string
-				var err error
-
-				currentMode, err := nvimClient.GetCurrentMode()
+				context, err := nvimClient.BuildTranscriptionContext()
 				if err != nil {
-					log.Printf("Error getting current nvim mode: %v", err)
+					log.Printf("nvim context: %v", err)
 					return
 				}
 
-				switch currentMode {
-				case InsertMode:
-					insertionText, err := nvimClient.GetInsertionText("{{CURSOR}}")
-
-					if err != nil {
-						log.Printf("Error getting insertion text: %v", err)
-						return
-					}
-
-					log.Printf("Inserting nvim context: %s", insertionText)
-					descriptionCh <- fmt.Sprintf(
-						"The user is inserting into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
-						insertionText,
-					)
-
-				case NormalMode, VisualMode, CommandMode:
-					visibleText, err = nvimClient.GetVisibleText()
-					if err != nil {
-						log.Printf("Error getting visible text: %v", err)
-						return
-					}
-
-					log.Printf("Visible nvim context: %s", visibleText)
-					descriptionCh <- fmt.Sprintf(
-						"The user is in a text editor with the following content:\n%s",
-						visibleText,
-					)
-
-				default:
-					log.Printf("Unhandled nvim mode, skipping description: %s", currentMode)
-					return
-				}
-
+				log.Printf("nvim context: %s", context)
+				descriptionCh <- context
 			}()
 		} else {
 			close(descriptionCh)

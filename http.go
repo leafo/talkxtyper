@@ -47,6 +47,39 @@ var contextPageTemplate = template.Must(template.New("context").Parse(`
 	</html>
 `))
 
+var nvimListPageTemplate = template.Must(template.New("nvimList").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>nvim Instances</title>
+	</head>
+	<body>
+		<h1>nvim instances</h1>
+		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
+		{{if .Instances}}
+			<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
+				<tr>
+					<th>PID</th>
+					<th>Socket</th>
+					<th>Active</th>
+					<th></th>
+				</tr>
+				{{range .Instances}}
+					<tr>
+						<td>{{.Pid}}</td>
+						<td><code>{{.SocketFile}}</code></td>
+						<td>{{if .Active}}yes{{end}}</td>
+						<td><a href="/nvim?pid={{.Pid}}">Open</a></td>
+					</tr>
+				{{end}}
+			</table>
+		{{else}}
+			<p>No running nvim instances found</p>
+		{{end}}
+	</body>
+	</html>
+`))
+
 var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 	<!DOCTYPE html>
 	<html>
@@ -54,16 +87,41 @@ var nvimPageTemplate = template.Must(template.New("nvim").Parse(`
 		<title>nvim Context</title>
 	</head>
 	<body>
-		<h1>nvim remote</h1>
-		<form>
-			<label for="command">Enter Lua command:</label><br>
-			<textarea id="command" name="command" style="min-height: 100px; width: 100%; box-sizing: border-box;">{{.Command}}</textarea><br><br>
+		<h1>nvim remote (PID {{.Pid}})</h1>
+		<p>
+			<a href="/nvim">&larr; All instances</a>
+			&nbsp;|&nbsp;
+			Auto refresh:
+			{{if .Refresh}}
+				<b>on</b> (<a href="/nvim?pid={{.Pid}}&view={{.View}}">turn off</a>)
+			{{else}}
+				<b>off</b> (<a href="/nvim?pid={{.Pid}}&view={{.View}}&refresh=on">turn on</a>)
+			{{end}}
+		</p>
+		<dl>
+			<dt><a href="/nvim?pid={{.Pid}}&view=insertion{{if .Refresh}}&refresh=on{{end}}">Insertion text</a>{{if eq .View "insertion"}} &mdash; current{{end}}</dt>
+			<dd>Lines around the cursor with a <code>&lt;&lt;CURSOR&gt;&gt;</code> sigil. Insert mode only.</dd>
 
-			<div>
-				<input type="submit" value="Submit">
-				<button type="submit" name="refresh" value="on">Auto Refresh</button>
-			</div>
+			<dt><a href="/nvim?pid={{.Pid}}&view=visible{{if .Refresh}}&refresh=on{{end}}">Visible text</a>{{if eq .View "visible"}} &mdash; current{{end}}</dt>
+			<dd>Visible contents of every window in the current tab.</dd>
+
+			<dt><a href="/nvim?pid={{.Pid}}&view=preview{{if .Refresh}}&refresh=on{{end}}">Prompt preview</a>{{if eq .View "preview"}} &mdash; current{{end}}</dt>
+			<dd>The exact prompt fragment transcription would receive right now (mode-dispatched, wrapped).</dd>
+
+			<dt><a href="/nvim?pid={{.Pid}}&view=lua{{if .Refresh}}&refresh=on{{end}}">Lua REPL</a>{{if eq .View "lua"}} &mdash; current{{end}}</dt>
+			<dd>Run arbitrary Lua against this nvim. Debug tool, not used by transcription.</dd>
+		</dl>
+		<h2>{{.ViewLabel}}</h2>
+		{{if eq .View "lua"}}
+		<form>
+			<input type="hidden" name="pid" value="{{.Pid}}">
+			<input type="hidden" name="view" value="lua">
+			{{if .Refresh}}<input type="hidden" name="refresh" value="on">{{end}}
+			<label for="command">Lua expression:</label><br>
+			<textarea id="command" name="command" style="min-height: 100px; width: 100%; box-sizing: border-box;">{{.Command}}</textarea><br><br>
+			<input type="submit" value="Run">
 		</form>
+		{{end}}
 
 		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
 
@@ -179,28 +237,76 @@ func startServer() {
 	}))
 
 	http.HandleFunc("/nvim", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		pid := r.URL.Query().Get("pid")
+
+		if pid == "" {
+			instances, listErr := ListNvimInstances()
+			activePid := ActiveWindowPid()
+
+			type instanceRow struct {
+				Pid        string
+				SocketFile string
+				Active     bool
+			}
+			rows := make([]instanceRow, 0, len(instances))
+			for _, inst := range instances {
+				rows = append(rows, instanceRow{
+					Pid:        inst.Pid,
+					SocketFile: inst.SocketFile,
+					Active:     activePid != "" && hasAncestor(inst.Pid, activePid),
+				})
+			}
+
+			err := nvimListPageTemplate.Execute(w, map[string]any{
+				"Instances": rows,
+				"Error":     listErr,
+			})
+			if err != nil {
+				http.Error(w, "Error rendering template", http.StatusInternalServerError)
+			}
+			return
+		}
+
 		command := r.URL.Query().Get("command")
+		view := r.URL.Query().Get("view")
+		refresh := r.URL.Query().Get("refresh") != ""
 
 		nvimClient := NewNvimClient()
-		err := nvimClient.FindFirstNvim()
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error finding active nvim instance: %v", err), http.StatusInternalServerError)
+		if err := nvimClient.SetPid(pid); err != nil {
+			http.Error(w, fmt.Sprintf("Error targeting nvim PID %s: %v", pid, err), http.StatusInternalServerError)
 			return
 		}
 
 		var nvimContext string
 		var nvimError error
+		var viewLabel string
 
-		if command != "" {
-			nvimContext, nvimError = nvimClient.RemoteExecuteLua(command)
-		} else {
+		switch view {
+		case "lua":
+			viewLabel = "Lua REPL"
+			if command != "" {
+				nvimContext, nvimError = nvimClient.RemoteExecuteLua(command)
+			}
+		case "visible":
+			viewLabel = "Visible text (raw GetVisibleText)"
+			nvimContext, nvimError = nvimClient.GetVisibleText()
+		case "preview":
+			viewLabel = "Prompt preview (what transcription would receive)"
+			nvimContext, nvimError = nvimClient.BuildTranscriptionContext()
+		default:
+			view = "insertion"
+			viewLabel = "Insertion text (insert mode only)"
 			nvimContext, nvimError = nvimClient.GetInsertionText("<<CURSOR>>")
 		}
 
-		err = nvimPageTemplate.Execute(w, map[string]any{
-			"Command": command,
-			"Context": nvimContext,
-			"Error":   nvimError,
+		err := nvimPageTemplate.Execute(w, map[string]any{
+			"Pid":       pid,
+			"View":      view,
+			"Refresh":   refresh,
+			"Command":   command,
+			"Context":   nvimContext,
+			"Error":     nvimError,
+			"ViewLabel": viewLabel,
 		})
 
 		if err != nil {

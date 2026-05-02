@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 
 	"flag"
 
@@ -197,6 +199,11 @@ func onReady() {
 	mIncludeScreen := systray.AddMenuItemCheckbox("Include screen", "Analyze the screen to augment the transcription", config.IncludeScreen)
 	mIncludeNvim := systray.AddMenuItemCheckbox("Include nvim", "Include text from current nvim viewport in the transcription", config.IncludeNvim)
 
+	var mOpenHTTP *systray.MenuItem
+	if config.ListenAddress != "" {
+		mOpenHTTP = systray.AddMenuItem("Open HTTP interface", "Open the HTTP interface in a browser")
+	}
+
 	mExit := systray.AddMenuItem("Exit", "Exit the application")
 
 	// setup hotkeys
@@ -212,6 +219,11 @@ func onReady() {
 		log.Printf("Failed to register abort hotkey: %v", err)
 	} else {
 		log.Println("Abort recording: Alt+C")
+	}
+
+	var openHTTPCh chan struct{}
+	if mOpenHTTP != nil {
+		openHTTPCh = mOpenHTTP.ClickedCh
 	}
 
 	go func() {
@@ -274,6 +286,11 @@ func onReady() {
 					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
 				}
 
+			case <-openHTTPCh:
+				if err := openHTTPInterface(config.ListenAddress); err != nil {
+					log.Printf("Failed to open HTTP interface: %v", err)
+				}
+
 			case <-mExit.ClickedCh:
 				systray.Quit()
 
@@ -285,4 +302,13 @@ func onReady() {
 func typeString(input string) error {
 	robotgo.TypeStr(input, 0, 2)
 	return nil
+}
+
+func openHTTPInterface(addr string) error {
+	host := addr
+	if strings.HasPrefix(host, ":") {
+		host = "localhost" + host
+	}
+	url := "http://" + host
+	return exec.Command("xdg-open", url).Start()
 }

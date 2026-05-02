@@ -112,9 +112,93 @@ type NvimClient struct {
 	socketFile string
 }
 
+type NvimInstance struct {
+	Pid        string
+	SocketFile string
+}
+
 // NewNvimClient creates a new NvimClient for a given PID
 func NewNvimClient() *NvimClient {
 	return &NvimClient{}
+}
+
+// ListNvimInstances returns every nvim process owned by the user that has a
+// usable remote socket
+func ListNvimInstances() ([]NvimInstance, error) {
+	cmd := exec.Command("sh", "-c", `pgrep -u $USER -x nvim`)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	var instances []NvimInstance
+	for _, pid := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if pid == "" {
+			continue
+		}
+		socketFile, err := findRemoteSocketFile(pid)
+		if err != nil {
+			continue
+		}
+		instances = append(instances, NvimInstance{Pid: pid, SocketFile: socketFile})
+	}
+	return instances, nil
+}
+
+// ActiveWindowPid returns the PID of the X11 active window, or "" if it
+// cannot be determined
+func ActiveWindowPid() string {
+	out, err := exec.Command("xprop", "-root", "_NET_ACTIVE_WINDOW").Output()
+	if err != nil {
+		return ""
+	}
+	// _NET_ACTIVE_WINDOW(WINDOW): window id # 0x...
+	fields := strings.Fields(string(out))
+	if len(fields) < 5 {
+		return ""
+	}
+	winID := fields[4]
+
+	out, err = exec.Command("xprop", "-id", winID, "_NET_WM_PID").Output()
+	if err != nil {
+		return ""
+	}
+	// _NET_WM_PID(CARDINAL) = 12345
+	fields = strings.Fields(string(out))
+	if len(fields) < 3 {
+		return ""
+	}
+	return fields[len(fields)-1]
+}
+
+// processParent returns the PPid of pid (read from /proc/<pid>/status), or ""
+func processParent(pid string) string {
+	data, err := os.ReadFile("/proc/" + pid + "/status")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "PPid:") {
+			return strings.TrimSpace(line[len("PPid:"):])
+		}
+	}
+	return ""
+}
+
+// hasAncestor returns true if `ancestor` is `pid` or any of its parent PIDs.
+// Walks /proc upward; bounded to avoid pathological loops.
+func hasAncestor(pid, ancestor string) bool {
+	current := pid
+	for i := 0; i < 64; i++ {
+		if current == "" || current == "0" {
+			return false
+		}
+		if current == ancestor {
+			return true
+		}
+		current = processParent(current)
+	}
+	return false
 }
 
 // gets the default location for nvim process remote socket based on the PID
@@ -129,49 +213,24 @@ func findRemoteSocketFile(pid string) (string, error) {
 
 // sets the socket to the active window if it's an nvim instance
 func (client *NvimClient) FindActiveNvim() error {
-	// find the PID of the active window in X
-	cmd := exec.Command("sh", "-c", `xprop -root _NET_ACTIVE_WINDOW | awk '{print $5}' | xargs -I {} xprop -id {} _NET_WM_PID | awk '{print $3}'`)
-	output, err := cmd.Output()
-	if err != nil {
-		return err
-	}
-	pid := strings.TrimSpace(string(output))
-
-	if pid == "" {
+	activePid := ActiveWindowPid()
+	if activePid == "" {
 		return fmt.Errorf("No active window found")
 	}
 
-	var searchPid func(string) (string, error)
-	searchPid = func(currentPid string) (string, error) {
-		socketFile, err := findRemoteSocketFile(currentPid)
-
-		if err == nil {
-			return socketFile, nil
-		}
-
-		cmd := exec.Command("sh", "-c", fmt.Sprintf(`pgrep -P %s`, currentPid))
-		output, err := cmd.Output()
-		if err != nil {
-			return "", err
-		}
-		childPids := strings.SplitSeq(strings.TrimSpace(string(output)), "\n")
-
-		for childPid := range childPids {
-			socketFile, err = searchPid(childPid)
-			if err == nil {
-				return socketFile, nil
-			}
-		}
-		return "", fmt.Errorf("No nvim process within PID %s", currentPid)
+	instances, err := ListNvimInstances()
+	if err != nil {
+		return err
 	}
 
-	socketFile, err := searchPid(pid)
-	if err == nil {
-		client.socketFile = socketFile
-		return nil
+	for _, inst := range instances {
+		if hasAncestor(inst.Pid, activePid) {
+			client.socketFile = inst.SocketFile
+			return nil
+		}
 	}
 
-	return fmt.Errorf("No nvim process found as a subprocess of PID %s", pid)
+	return fmt.Errorf("No nvim process found under active window PID %s", activePid)
 }
 
 // find any running nvim server and set the socket file path
@@ -195,6 +254,16 @@ func (client *NvimClient) FindFirstNvim() error {
 	}
 
 	return fmt.Errorf("no valid nvim socket file found")
+}
+
+// SetPid points the client at the nvim process with the given PID
+func (client *NvimClient) SetPid(pid string) error {
+	socketFile, err := findRemoteSocketFile(pid)
+	if err != nil {
+		return err
+	}
+	client.socketFile = socketFile
+	return nil
 }
 
 func (client *NvimClient) RemoteExecute(command string) (string, error) {
@@ -221,6 +290,41 @@ func (client *NvimClient) RemoteExecuteLua(command string) (string, error) {
 	command = strings.ReplaceAll(command, "'", "''")
 	luaCommand := fmt.Sprintf("luaeval('(function() %s end)()')", command)
 	return client.RemoteExecute(luaCommand)
+}
+
+// BuildTranscriptionContext returns the prompt fragment that would be sent
+// alongside transcription based on the current nvim mode. Returns "" if the
+// mode isn't one we add context for.
+func (client *NvimClient) BuildTranscriptionContext() (string, error) {
+	mode, err := client.GetCurrentMode()
+	if err != nil {
+		return "", fmt.Errorf("get mode: %w", err)
+	}
+
+	switch mode {
+	case InsertMode:
+		text, err := client.GetInsertionText("{{CURSOR}}")
+		if err != nil {
+			return "", fmt.Errorf("get insertion text: %w", err)
+		}
+		return fmt.Sprintf(
+			"The user is inserting into a text editor with the following content. The cursor is located at {{CURSOR}}:\n%s",
+			text,
+		), nil
+
+	case NormalMode, VisualMode, CommandMode:
+		text, err := client.GetVisibleText()
+		if err != nil {
+			return "", fmt.Errorf("get visible text: %w", err)
+		}
+		return fmt.Sprintf(
+			"The user is in a text editor with the following content:\n%s",
+			text,
+		), nil
+
+	default:
+		return "", fmt.Errorf("unhandled nvim mode: %s", mode)
+	}
 }
 
 // Returns the text in nvim surrounding the cursor when in insertion mode
