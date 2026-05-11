@@ -7,6 +7,8 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"math"
+	"sync"
 	"time"
 
 	portaudio "github.com/gordonklaus/portaudio"
@@ -65,6 +67,10 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 	}
 	defer stream.Stop()
 
+	if err := playReadyBeep(); err != nil {
+		log.Printf("Failed to play ready beep: %v", err)
+	}
+
 	log.Println("Recording, waiting for stop signal...")
 	select {
 	case <-stopCh:
@@ -111,6 +117,78 @@ func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
 	}
 
 	return tempFile.Name(), nil
+}
+
+// playReadyBeep plays a short tone through the default output device to
+// signal that the input stream is live and capture has begun. The microphone
+// may briefly pick up the beep, but the user should only start speaking
+// after hearing it, so their speech is captured intact.
+func playReadyBeep() error {
+	outputDevice, err := findDeviceByName("pipewire")
+	if err != nil {
+		return fmt.Errorf("Error finding output device for beep: %v", err)
+	}
+
+	const beepFreq = 880.0
+	const beepDurationMs = 120
+	const beepAmplitude = 0.25
+
+	numSamples := sampleRate * beepDurationMs / 1000
+	samples := make([]int16, numSamples)
+	fadeLen := numSamples / 8
+	for i := 0; i < numSamples; i++ {
+		envelope := 1.0
+		if i < fadeLen {
+			envelope = float64(i) / float64(fadeLen)
+		} else if i > numSamples-fadeLen {
+			envelope = float64(numSamples-i) / float64(fadeLen)
+		}
+		samples[i] = int16(math.Sin(2*math.Pi*beepFreq*float64(i)/float64(sampleRate)) * beepAmplitude * envelope * 32767)
+	}
+
+	idx := 0
+	done := make(chan struct{})
+	var doneOnce sync.Once
+	stream, err := portaudio.OpenStream(portaudio.StreamParameters{
+		Output: portaudio.StreamDeviceParameters{
+			Device:   outputDevice,
+			Channels: 1,
+			Latency:  outputDevice.DefaultLowOutputLatency,
+		},
+		SampleRate:      sampleRate,
+		FramesPerBuffer: bufferSize,
+	}, func(out []int16) {
+		for i := range out {
+			if idx < len(samples) {
+				out[i] = samples[idx]
+				idx++
+			} else {
+				out[i] = 0
+			}
+		}
+		if idx >= len(samples) {
+			doneOnce.Do(func() { close(done) })
+		}
+	})
+
+	if err != nil {
+		return fmt.Errorf("Error opening beep stream: %v", err)
+	}
+	defer stream.Close()
+
+	if err := stream.Start(); err != nil {
+		return fmt.Errorf("Error starting beep stream: %v", err)
+	}
+	defer stream.Stop()
+
+	select {
+	case <-done:
+	case <-time.After(time.Duration(beepDurationMs+200) * time.Millisecond):
+	}
+	// Let the output buffer drain so the tail of the tone isn't clipped.
+	time.Sleep(40 * time.Millisecond)
+
+	return nil
 }
 
 func playRecording(recordingBuffer []int16) error {
