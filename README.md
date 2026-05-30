@@ -36,6 +36,19 @@ variable" instead of the symbol on the screen.
    - [x] Implement text extraction from nvim using the `nvim` remote API
    - [ ] Explore extracting text from browser. (Consider a browser extension)
 
+## Hotkeys
+
+TalkXTyper registers the following global hotkeys:
+
+- `Alt+B`: Toggle recording. Press once to start recording, press again to stop
+  recording and begin transcription.
+- `Alt+C`: Abort the current task. This cancels the operation regardless of
+  state, so it works both while recording and while a transcription is already
+  in flight. Aborting discards the result and types nothing.
+
+These actions are also available from the systray menu ("Record and Transcribe"
+and "Abort Recording").
+
 ## Configuration
 
 The configuration for TalkXTyper is stored in a JSON file located in your user
