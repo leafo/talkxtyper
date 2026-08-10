@@ -1,7 +1,7 @@
 # TalkXTyper
 
 TalkXTyper is a desktop application that will, on command, record your voice,
-transcribe it using the OpenAI Whisper API, and "type" it to your computer. It
+transcribe it using the OpenAI transcription API, and "type" it to your computer. It
 is activated with a global hotkey so that you do not lose focus on the area
 you're typing into.
 
@@ -10,25 +10,26 @@ you're typing into.
 There are a few transcription tools out there, but I wanted to create my own so
 I could explore different ideas based around my own workflow.
 
-Although Whisper is very good, it lacks context for what is going on on the
-screen. For example, if you are coding and want to reference a variable on the
-screen named `my_variable`, saying "my variable" will often produce "My
-variable" instead of the symbol on the screen.
+Although modern transcription models are very good, they do not automatically
+know what is on the screen. For example, if you are coding and want to reference
+a variable on the screen named `my_variable`, saying "my variable" may produce
+"My variable" instead of the symbol on the screen.
 
 ### Attempts
 
-1. **Send screenshot of desktop to to gpt-4o**
+1. **Send a desktop screenshot to the context model**
    - [x] Idea: take and send screenshot of the desktop while audio is being recorded,
    send image to gpt-4o to ask it to extract relevant textual features from the
-   image. Combine the extracted information with the whisper output to attempt
+   image. Combine the extracted information with the transcription output to attempt
    to fix the transcription to match text on the screen.
-     - Resut: gpt-4o with vision is too slow, it makes the typing experience too slow
+     - Result: vision processing can make the typing experience too slow
    - [ ] Use Claude Sonnet 3.5, it appears to be much faster with image processing
 
-2. **Using the `prompt` parameter with Whisper API**
-   The whisper API includes a `prompt` parameter that can be used for basic
-   instruction during transcription. The results were poor and the max size is
-   short. Haven't found a use for it
+2. **Provide context to the transcription model**
+   The `gpt-transcribe` API accepts a free-form `prompt` plus keyword and
+   language hints. TalkXTyper passes available screen, Neovim, or tmux context
+   into the transcription request and retains a second repair pass for
+   context-specific corrections.
 
 3. **Extract text from running app**
    Idea: Query what the currently focused app is, then have custom code to
@@ -56,7 +57,7 @@ configuration directory. The file is named `talkxtyper-config.json`.
 
 ### Configuration Options
 
-- `OpenAIKey`: Your API key for the OpenAI Whisper API.
+- `OpenAIKey`: Your API key for the OpenAI API.
 - `IncludeScreen`: A boolean value indicating whether to analyze the screen to augment the transcription. The config file will be updated automatically if you change this value in the program.
 - `IncludeNvim`: A boolean value indicating whether to analyze the screen to augment the transcription.
 
@@ -88,4 +89,3 @@ This project has only been tested on Linux, but it uses cross-platform libraries
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
-

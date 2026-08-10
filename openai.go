@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"os"
 
-	"github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 )
 
 var fixPrompt = `You are a voice-to-text typing program that takes the textual result of an automated transcription and a context from the user's current environment (e.g. their active editor buffer, terminal pane, or screen) and fixes the transcription to be what the user likely intended to type.
@@ -25,27 +26,35 @@ func getOpenAIClient() (*openai.Client, error) {
 			return nil, fmt.Errorf("OpenAI API key is not set")
 		}
 	}
-	return openai.NewClient(apiKey), nil
+	client := openai.NewClient(option.WithAPIKey(apiKey))
+	return &client, nil
 }
 
-// in my testing the Prompt parameter is not very good at repairing the transcription, so we do a two pass process instead
+// gpt-transcribe receives the available application context during transcription.
+// The second pass remains as a final correction step for identifiers and other
+// context-specific text.
 func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (*TranscriptionResult, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
-	// Create a request for transcription
-	req := openai.AudioRequest{
-		FilePath:    mp3FilePath,
-		Model:       "whisper-1",
-		Language:    "en",
-		Temperature: 0.5,
-		// Prompt:      instructions,
+	audioFile, err := os.Open(mp3FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("Error opening audio file: %v", err)
+	}
+	defer audioFile.Close()
+
+	req := openai.AudioTranscriptionNewParams{
+		File:      audioFile,
+		Model:     "gpt-transcribe",
+		Languages: []string{"en"},
+	}
+	if instructions != "" {
+		req.Prompt = openai.String(instructions)
 	}
 
-	// Perform the transcription
-	resp, err := client.CreateTranscription(ctx, req)
+	resp, err := client.Audio.Transcriptions.New(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("Error sending transcription request: %v", err)
 	}
@@ -73,35 +82,24 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
-	var messages = []openai.ChatCompletionMessage{
-		{
-			Role:    "system",
-			Content: fixPrompt,
-		},
-		{
-			Role:    "user",
-			Content: fmt.Sprintf("Context: %s", instructions),
-		},
-		{
-			Role:    "user",
-			Content: fmt.Sprintf("Transcription: %s", transcribedText),
-		},
+	req := responses.ResponseNewParams{
+		Model:           config.ChatModel,
+		Instructions:    openai.String(fixPrompt),
+		Input:           responses.ResponseNewParamsInputUnion{OfString: openai.String(fmt.Sprintf("Context: %s\n\nTranscription: %s", instructions, transcribedText))},
+		MaxOutputTokens: openai.Int(1024),
+		Store:           openai.Bool(false),
 	}
 
-	req := openai.ChatCompletionRequest{
-		Model:     config.ChatModel,
-		Messages:  messages,
-		MaxCompletionTokens: 1024,
-	}
-
-	// log.Printf("ChatCompletion for fixing transcription: %+v\n", req)
-
-	resp, err := client.CreateChatCompletion(ctx, req)
+	resp, err := client.Responses.New(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("Error sending transcription fix request: %v", err)
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	text := resp.OutputText()
+	if text == "" {
+		return "", fmt.Errorf("Transcription fix returned no text")
+	}
+	return text, nil
 }
 
 func describeImage(ctx context.Context, imagePath string) (string, error) {
@@ -111,7 +109,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 	}
 
 	// Read image file
-	imageData, err := ioutil.ReadFile(imagePath)
+	imageData, err := os.ReadFile(imagePath)
 	if err != nil {
 		return "", fmt.Errorf("Error reading image file: %v", err)
 	}
@@ -120,39 +118,31 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 	encodedImage := base64.StdEncoding.EncodeToString(imageData)
 	imageDataURL := fmt.Sprintf("data:image/png;base64,%s", encodedImage)
 
-	var imageMessage = openai.ChatCompletionMessage{
-		Role: "user",
-		MultiContent: []openai.ChatMessagePart{
-			{
-				Type: openai.ChatMessagePartTypeImageURL,
-				ImageURL: &openai.ChatMessageImageURL{
-					URL: imageDataURL,
-				},
+	imageInput := responses.ResponseInputContentParamOfInputImage(responses.ResponseInputImageDetailAuto)
+	imageInput.OfInputImage.ImageURL = openai.String(imageDataURL)
+
+	req := responses.ResponseNewParams{
+		Model:        config.ChatModel,
+		Instructions: openai.String("You are a voice to text typing assistant who is collecting text on the user's current screen so that a machine generated transcription can be edited to match any phrases appearing on the screen. Include 1 sentence description of what the user is engaging with. Then list out all relevant keywords/names/words that appear in the provided image so that the transcription may be corrected."),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: responses.ResponseInputParam{
+				responses.ResponseInputItemParamOfMessage(
+					responses.ResponseInputMessageContentListParam{imageInput},
+					responses.EasyInputMessageRoleUser,
+				),
 			},
 		},
+		Store: openai.Bool(false),
 	}
 
-	var messages = []openai.ChatCompletionMessage{
-		openai.ChatCompletionMessage{
-			Role:    "system",
-			Content: "You are a voice to text typing assistant who is collecting text on the user's current screen so that a machine generated transcription can be edited to match any phrases appearing on the screen. Include 1 sentence description of what the user is engaging with. Then list out all relevant keywords/names/words that appear in the provided image so that the transcription may be corrected.",
-		},
-		imageMessage,
-	}
-
-	// Create a request for image description
-	req := openai.ChatCompletionRequest{
-		Model:    config.ChatModel,
-		Messages: messages,
-	}
-
-	// log.Printf("ChatCompletion: %+v\n", req)
-
-	// Perform the image description
-	resp, err := client.CreateChatCompletion(ctx, req)
+	resp, err := client.Responses.New(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("Error sending image description request: %v", err)
 	}
 
-	return resp.Choices[0].Message.Content, nil
+	text := resp.OutputText()
+	if text == "" {
+		return "", fmt.Errorf("Image description returned no text")
+	}
+	return text, nil
 }
