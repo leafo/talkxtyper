@@ -121,6 +121,10 @@ func oneShotMode() {
 	config.IncludeScreen = false
 	config.IncludeNvim = false
 
+	// live mode types as it transcribes, which would type into the console;
+	// one-shot's contract is printing the transcript to stdout
+	config.TranscriptionMode = TranscriptionModeBuffered
+
 	log.Println("Now recording... (Press Ctrl+C or ESC to stop)")
 
 	stopHotkey := hotkey.New(nil, hotkey.KeyEscape)
@@ -145,6 +149,9 @@ func oneShotMode() {
 						systray.SetTooltip("Recording audio...")
 					case TaskStateTranscribing:
 						systray.SetTooltip("Transcribing audio...")
+						systray.SetIcon(icon_green)
+					case TaskStateFinalizing:
+						systray.SetTooltip("Finalizing live transcription...")
 						systray.SetIcon(icon_green)
 					default:
 						systray.SetTooltip("Ready")
@@ -212,6 +219,9 @@ func onReady() {
 	mRecord := systray.AddMenuItem("Record and Transcribe"+recordHotkeyLabel, "Start recording and transcribing")
 	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
 	mAbort.Hide()
+	mTranscriptionMode := systray.AddMenuItem("Transcription mode: "+transcriptionModeLabel(config.TranscriptionMode), "Choose buffered file transcription or live streaming transcription")
+	mBufferedMode := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — gpt-transcribe", "Record first, then upload the completed audio file", config.TranscriptionMode != TranscriptionModeLive)
+	mLiveMode := mTranscriptionMode.AddSubMenuItemCheckbox("Live — gpt-live-transcribe", "Type the transcript as you speak; no repair pass", config.TranscriptionMode == TranscriptionModeLive)
 
 	mIncludeScreen := systray.AddMenuItemCheckbox("1. Include screen", "Highest priority. Sends a screenshot description; skips nvim/tmux when enabled.", config.IncludeScreen)
 	mIncludeNvim := systray.AddMenuItemCheckbox("2. Include nvim", "Tried before tmux. Falls through to tmux if no active nvim is found.", config.IncludeNvim)
@@ -236,21 +246,36 @@ func onReady() {
 				switch state {
 				case TaskStateRecording:
 					systray.SetIcon(icon_red)
-					systray.SetTooltip("Recording audio...")
+					if config.TranscriptionMode == TranscriptionModeLive {
+						systray.SetTooltip("Recording and transcribing live...")
+					} else {
+						systray.SetTooltip("Recording audio (Buffered)...")
+					}
 					mRecord.SetTitle("Stop recording" + recordHotkeyLabel)
 					mAbort.Show()
+					mBufferedMode.Disable()
+					mLiveMode.Disable()
 				case TaskStateTranscribing:
 					systray.SetTooltip("Transcribing audio...")
+					systray.SetIcon(icon_green)
+				case TaskStateFinalizing:
+					systray.SetTooltip("Finalizing live transcription...")
 					systray.SetIcon(icon_green)
 				default:
 					systray.SetTooltip("Ready")
 					systray.SetIcon(icon_blue)
 					mRecord.SetTitle("Record and Transcribe" + recordHotkeyLabel)
 					mAbort.Hide()
+					mBufferedMode.Enable()
+					mLiveMode.Enable()
 				}
 
 			case transcription := <-taskManager.transcriptionRes:
-				typeString(transcription.String())
+				// Live mode already typed the transcript as it streamed; the
+				// result here is only for history.
+				if transcription.TranscriptionMode != TranscriptionModeLive {
+					typeString(transcription.String())
+				}
 
 			case <-toggleHotkey.Keydown():
 				taskManager.StartOrStopTask()
@@ -262,6 +287,24 @@ func onReady() {
 				taskManager.StartOrStopTask()
 			case <-mAbort.ClickedCh:
 				taskManager.Abort()
+
+			case <-mBufferedMode.ClickedCh:
+				config.TranscriptionMode = TranscriptionModeBuffered
+				mBufferedMode.Check()
+				mLiveMode.Uncheck()
+				mTranscriptionMode.SetTitle("Transcription mode: " + transcriptionModeLabel(config.TranscriptionMode))
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
+
+			case <-mLiveMode.ClickedCh:
+				config.TranscriptionMode = TranscriptionModeLive
+				mLiveMode.Check()
+				mBufferedMode.Uncheck()
+				mTranscriptionMode.SetTitle("Transcription mode: " + transcriptionModeLabel(config.TranscriptionMode))
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
 
 			case <-mIncludeScreen.ClickedCh:
 				if mIncludeScreen.Checked() {
@@ -313,6 +356,13 @@ func onReady() {
 			}
 		}
 	}()
+}
+
+func transcriptionModeLabel(mode TranscriptionMode) string {
+	if normalizeTranscriptionMode(mode) == TranscriptionModeLive {
+		return "Live"
+	}
+	return "Buffered"
 }
 
 func typeString(input string) error {

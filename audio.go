@@ -16,35 +16,66 @@ import (
 )
 
 const sampleRate = 44100
+const liveSampleRate = 24000
 const bufferSize = 256
 const maxRecordSeconds = 30
 const minRecordSeconds = 1
 const debug = false
 
-func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
+type AudioRecording struct {
+	Samples    []int16
+	SampleRate int
+}
+
+// recordAudioStream captures mono PCM16 audio. When onChunk is non-nil, copied
+// chunks are delivered from a worker goroutine so PortAudio's callback never
+// blocks on network I/O.
+func recordAudioStream(ctx context.Context, stopCh <-chan struct{}, recordingSampleRate int, onChunk func([]int16) error) (AudioRecording, error) {
 	ctx, cancel := context.WithTimeout(ctx, maxRecordSeconds*time.Second)
 	defer cancel()
 
 	err := portaudio.Initialize()
 	if err != nil {
-		return nil, fmt.Errorf("Error initializing PortAudio: %v", err)
+		return AudioRecording{}, fmt.Errorf("Error initializing PortAudio: %v", err)
 	}
 	defer portaudio.Terminate()
 
 	// TODO: allow user to specify input device, the default is failing on my computer
 	inputDevice, err := findDeviceByName("pipewire")
 	if err != nil {
-		return nil, fmt.Errorf("Error finding input device: %v", err)
+		return AudioRecording{}, fmt.Errorf("Error finding input device: %v", err)
 	}
 
 	var recordingBuffer []int16
+	var chunkCh chan []int16
+	var senderDone chan error
+	if onChunk != nil {
+		// Enough capacity for the full maximum recording prevents a slow socket
+		// from blocking or dropping audio in the realtime callback.
+		chunkCapacity := maxRecordSeconds*recordingSampleRate/bufferSize + 128
+		chunkCh = make(chan []int16, chunkCapacity)
+		senderDone = make(chan error, 1)
+		go func() {
+			for chunk := range chunkCh {
+				if err := onChunk(chunk); err != nil {
+					senderDone <- err
+					cancel()
+					return
+				}
+			}
+			senderDone <- nil
+		}()
+	}
+
+	var queueErr error
+	var queueErrMu sync.Mutex
 	stream, err := portaudio.OpenStream(portaudio.StreamParameters{
 		Input: portaudio.StreamDeviceParameters{
 			Device:   inputDevice,
 			Channels: 1,
 			Latency:  inputDevice.DefaultLowInputLatency,
 		},
-		SampleRate:      sampleRate,
+		SampleRate:      float64(recordingSampleRate),
 		FramesPerBuffer: bufferSize,
 	}, func(in []int16) {
 		if debug {
@@ -53,17 +84,38 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 		}
 
 		recordingBuffer = append(recordingBuffer, in...)
+		if chunkCh != nil {
+			chunk := append([]int16(nil), in...)
+			select {
+			case chunkCh <- chunk:
+			default:
+				queueErrMu.Lock()
+				if queueErr == nil {
+					queueErr = fmt.Errorf("live audio queue is full")
+					cancel()
+				}
+				queueErrMu.Unlock()
+			}
+		}
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("Error opening default stream: %v", err)
+		if chunkCh != nil {
+			close(chunkCh)
+			<-senderDone
+		}
+		return AudioRecording{}, fmt.Errorf("Error opening default stream: %v", err)
 	}
 	defer stream.Close()
 
 	startTime := time.Now()
 
 	if err := stream.Start(); err != nil {
-		return nil, fmt.Errorf("Error starting stream: %v", err)
+		if chunkCh != nil {
+			close(chunkCh)
+			<-senderDone
+		}
+		return AudioRecording{}, fmt.Errorf("Error starting stream: %v", err)
 	}
 	defer stream.Stop()
 
@@ -78,22 +130,38 @@ func recordAudio(ctx context.Context, stopCh <-chan struct{}) ([]int16, error) {
 		log.Println("Recording finished.")
 	case <-ctx.Done():
 		stream.Stop()
-		return nil, fmt.Errorf("Recording cancelled")
+	}
+
+	if chunkCh != nil {
+		close(chunkCh)
+		if err := <-senderDone; err != nil {
+			return AudioRecording{}, fmt.Errorf("Error streaming audio: %v", err)
+		}
+	}
+
+	queueErrMu.Lock()
+	err = queueErr
+	queueErrMu.Unlock()
+	if err != nil {
+		return AudioRecording{}, err
+	}
+	if ctx.Err() != nil {
+		return AudioRecording{}, fmt.Errorf("Recording cancelled")
 	}
 
 	if time.Since(startTime) < minRecordSeconds*time.Second {
-		return nil, fmt.Errorf("Aborting, recording too short: < %d seconds", minRecordSeconds)
+		return AudioRecording{}, fmt.Errorf("Aborting, recording too short: < %d seconds", minRecordSeconds)
 	}
 
-	return recordingBuffer, nil
+	return AudioRecording{Samples: recordingBuffer, SampleRate: recordingSampleRate}, nil
 }
 
 // encode and write an audio recording to a MP3 file to a temporary file path
 // and return the path
-func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
+func writeAudioRecordingToMP3(recording AudioRecording) (string, error) {
 	// Convert int16 buffer to byte buffer
 	byteBuffer := new(bytes.Buffer)
-	for _, sample := range recordingBuffer {
+	for _, sample := range recording.Samples {
 		byteBuffer.WriteByte(byte(sample & 0xff))
 		byteBuffer.WriteByte(byte((sample >> 8) & 0xff))
 	}
@@ -108,7 +176,7 @@ func writeRecordingToMP3(recordingBuffer []int16) (string, error) {
 	// Initialize LAME encoder with the output file handle
 	encoder := lame.NewEncoder(tempFile)
 	encoder.SetNumChannels(1)
-	encoder.SetInSamplerate(sampleRate)
+	encoder.SetInSamplerate(recording.SampleRate)
 	defer encoder.Close()
 
 	// Encode to MP3

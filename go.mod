@@ -3,6 +3,7 @@ module github.com/leafo/talkxtyper
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/getlantern/systray v1.2.2
 	github.com/go-vgo/robotgo v1.0.2
 	github.com/google/uuid v1.6.0

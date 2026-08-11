@@ -19,15 +19,23 @@ You will output only the updated transcription and no other text. Do not output 
 // The transcription was generated from spoken words and may contain errors. Please use the text provided to identify and correct any inaccuracies, focusing on misheard words, technical terms, or any context-specific discrepancies.
 
 func getOpenAIClient() (*openai.Client, error) {
+	apiKey, err := getOpenAIAPIKey()
+	if err != nil {
+		return nil, err
+	}
+	client := openai.NewClient(option.WithAPIKey(apiKey))
+	return &client, nil
+}
+
+func getOpenAIAPIKey() (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		apiKey = config.OpenAIKey
 		if apiKey == "" {
-			return nil, fmt.Errorf("OpenAI API key is not set")
+			return "", fmt.Errorf("OpenAI API key is not set")
 		}
 	}
-	client := openai.NewClient(option.WithAPIKey(apiKey))
-	return &client, nil
+	return apiKey, nil
 }
 
 // gpt-transcribe receives the available application context during transcription.
@@ -61,8 +69,9 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionConte
 	}
 
 	result := NewTranscriptionResult()
-
 	result.Original = resp.Text
+	result.TranscriptionMode = TranscriptionModeBuffered
+	result.TranscriptionModel = "gpt-transcribe"
 	result.TranscriptionKeywords = transcriptionContext.Keywords
 
 	if transcriptionContext.Prompt != "" {

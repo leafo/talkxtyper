@@ -8,6 +8,7 @@ const (
 	TaskStateIdle TaskState = iota
 	TaskStateRecording
 	TaskStateTranscribing
+	TaskStateFinalizing
 )
 
 const maxHistoryLength = 100
@@ -32,7 +33,7 @@ var taskManager = TaskManager{
 }
 
 func (tm *TaskManager) StartNewTask() *TranscribeTask {
-	newTask := NewTranscribeTask()
+	newTask := NewTranscribeTask(normalizeTranscriptionMode(config.TranscriptionMode))
 
 	oldTask := tm.currentTask.Swap(newTask)
 

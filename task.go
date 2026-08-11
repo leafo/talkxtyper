@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -14,6 +18,8 @@ type TranscriptionResult struct {
 	UUID                  string
 	Original              string
 	Modified              string
+	TranscriptionMode     TranscriptionMode
+	TranscriptionModel    string
 	TranscriptionKeywords []string
 	RepairPrompt          string
 	RepairModel           string
@@ -40,20 +46,27 @@ type TranscribeTask struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	result            *TranscriptionResult
+	mode              TranscriptionMode
+	state             atomic.Int32
 	mu                sync.Mutex
 }
 
 // TODO: this should take a context
-func NewTranscribeTask() *TranscribeTask {
+func NewTranscribeTask(mode TranscriptionMode) *TranscribeTask {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TranscribeTask{
 		ctx:    ctx,
 		cancel: cancel,
+		mode:   normalizeTranscriptionMode(mode),
 	}
 }
 
 // stop the recording so that transcription can be started
 func (t *TranscribeTask) StopRecording() {
+	if TaskState(t.state.Load()) == TaskStateIdle {
+		t.cancel()
+		return
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.stopRecordingCh != nil {
@@ -79,6 +92,11 @@ func (t *TranscribeTask) SetResult(result *TranscriptionResult) {
 	t.result = result
 }
 
+func (t *TranscribeTask) emitState(stateCh chan<- TaskState, state TaskState) {
+	t.state.Store(int32(state))
+	stateCh <- state
+}
+
 // TODO: this is designed to only be called once, but consider thread safety
 func (t *TranscribeTask) Start() chan TaskState {
 	t.stopRecordingCh = make(chan struct{})
@@ -88,101 +106,295 @@ func (t *TranscribeTask) Start() chan TaskState {
 	go func() {
 		defer close(t.waitForCompletion)
 		defer close(stateCh)
+		defer t.state.Store(int32(TaskStateIdle))
 
-		stateCh <- TaskStateRecording
-
-		contextCh := make(chan TranscriptionContext, 1)
-
-		// Priority order: screen > nvim > tmux. Screen wins outright when
-		// enabled (it always works). Otherwise nvim is tried first; if it has
-		// no active instance, fall through to tmux.
-		go func() {
-			defer close(contextCh)
-
-			if config.IncludeScreen {
-				description, err := describeScreen(t.ctx)
-				if err != nil {
-					log.Printf("Error describing screen: %v\n", err)
-					return
-				}
-				log.Printf("Screen Description: %s\n", description)
-				description = description + "\nPlease use the information about the user's screen to aid in transcribing the audio"
-				contextCh <- NewTranscriptionContext(description)
-				return
-			}
-
-			if config.IncludeNvim {
-				nvimClient := NewNvimClient()
-				if err := nvimClient.FindActiveNvim(); err != nil {
-					log.Printf("nvim: %v", err)
-				} else {
-					log.Printf("Using nvim socket: %s", nvimClient.socketFile)
-					context, err := nvimClient.BuildTranscriptionContext()
-					if err != nil {
-						log.Printf("nvim context: %v", err)
-					} else {
-						log.Printf("nvim context: %s", context)
-						contextCh <- NewTranscriptionContext(context)
-						return
-					}
-				}
-			}
-
-			if config.IncludeTmux {
-				context, err := BuildTmuxTranscriptionContext()
-				if err != nil {
-					log.Printf("tmux: %v", err)
-					return
-				}
-				log.Printf("tmux context: %s", context)
-				contextCh <- NewTranscriptionContext(context)
-			}
-		}()
-
-		recordingBuffer, err := recordAudio(t.ctx, t.stopRecordingCh)
-		if err != nil {
-			log.Printf("%v\n", err)
-			return
+		var err error
+		if t.mode == TranscriptionModeLive {
+			err = t.runLive(stateCh)
+		} else {
+			err = t.runBuffered(stateCh)
 		}
-
-		mp3Path, err := writeRecordingToMP3(recordingBuffer)
-		if err != nil {
-			log.Printf("Error writing MP3 file: %v\n", err)
-			return
+		if err != nil && t.ctx.Err() == nil {
+			log.Printf("Transcription task failed: %v\n", err)
 		}
-		defer os.Remove(mp3Path)
-
-		stateCh <- TaskStateTranscribing
-
-		log.Println("Audio ready, waiting for description")
-		transcriptionContext := NewTranscriptionContext("")
-		for context := range contextCh {
-			transcriptionContext = context
-		}
-		log.Printf("Transcription keywords: %q", transcriptionContext.Keywords)
-
-		transcription, err := transcribeAudio(t.ctx, mp3Path, transcriptionContext)
-
-		if err != nil {
-			log.Printf("Error transcribing audio: %v\n", err)
-			return
-		}
-
-		mp3Data, err := os.ReadFile(mp3Path)
-		log.Printf("MP3 data size: %d bytes, MP3 path: %s, error: %v\n", len(mp3Data), mp3Path, err)
-
-		if err == nil {
-			transcription.Mp3Recording = mp3Data
-		}
-
-		transcriptionJSON, err := json.Marshal(transcription)
-		if err == nil {
-			log.Printf("Transcription: %s\n", transcriptionJSON)
-		}
-
-		t.SetResult(transcription)
-		taskManager.AppendToHistory(transcription)
 	}()
 
 	return stateCh
+}
+
+func (t *TranscribeTask) runBuffered(stateCh chan<- TaskState) error {
+	t.emitState(stateCh, TaskStateRecording)
+	contextCh := collectTranscriptionContextAsync(t.ctx)
+
+	recording, err := recordAudioStream(t.ctx, t.stopRecordingCh, sampleRate, nil)
+	if err != nil {
+		return err
+	}
+	mp3Path, err := writeAudioRecordingToMP3(recording)
+	if err != nil {
+		return fmt.Errorf("writing MP3 file: %w", err)
+	}
+	defer os.Remove(mp3Path)
+
+	t.emitState(stateCh, TaskStateTranscribing)
+	log.Println("Audio ready, waiting for description")
+	transcriptionContext := <-contextCh
+	log.Printf("Transcription keywords: %q", transcriptionContext.Keywords)
+
+	result, err := transcribeAudio(t.ctx, mp3Path, transcriptionContext)
+	if err != nil {
+		return fmt.Errorf("transcribing audio: %w", err)
+	}
+	attachMP3(result, mp3Path)
+	t.complete(result)
+	return nil
+}
+
+func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
+	contextCh := collectTranscriptionContextAsync(t.ctx)
+
+	// Recording starts immediately; session setup and context collection run
+	// concurrently with it. Audio buffers locally until the session is
+	// configured, then flushes and streams from there.
+	type preparedSession struct {
+		session              *liveTranscriptionSession
+		transcriptionContext TranscriptionContext
+		err                  error
+	}
+	sessionCh := make(chan preparedSession, 1)
+	typerSessionCh := make(chan *liveTranscriptionSession, 1)
+	go func() {
+		var prepared preparedSession
+		prepared.err = func() error {
+			apiKey, err := getOpenAIAPIKey()
+			if err != nil {
+				return err
+			}
+			session, err := newLiveTranscriptionSession(t.ctx, apiKey, openAIClientSecretURL, openAIRealtimeWebSocketURL)
+			if err != nil {
+				return err
+			}
+			prepared.transcriptionContext = <-contextCh
+			if err := session.Configure(t.ctx, prepared.transcriptionContext); err != nil {
+				session.Close()
+				return fmt.Errorf("configuring live transcription: %w", err)
+			}
+			log.Printf("Live transcription keywords: %q", prepared.transcriptionContext.Keywords)
+			prepared.session = session
+			return nil
+		}()
+		if prepared.session != nil {
+			typerSessionCh <- prepared.session
+		} else {
+			close(typerSessionCh)
+		}
+		sessionCh <- prepared
+	}()
+
+	var session *liveTranscriptionSession
+	var transcriptionContext TranscriptionContext
+	sessionTaken := false
+	defer func() {
+		if session != nil {
+			session.Close()
+		} else if !sessionTaken {
+			// setup may still be in flight; close whatever it produces
+			go func() {
+				if prepared := <-sessionCh; prepared.session != nil {
+					prepared.session.Close()
+				}
+			}()
+		}
+	}()
+
+	// Deltas are typed the moment they arrive; there is no repair pass since
+	// typed text cannot be revised. Cancellation is checked before every type
+	// so an abort stops typing immediately and discards anything buffered.
+	stopCh := make(chan bool)
+	typedCh := make(chan string, 1)
+	go func() {
+		var typed strings.Builder
+		var typerSession *liveTranscriptionSession
+		select {
+		case typerSession = <-typerSessionCh:
+		case <-stopCh:
+			typedCh <- ""
+			return
+		}
+		if typerSession == nil {
+			<-stopCh
+			typedCh <- ""
+			return
+		}
+		typePending := func() {
+			if t.ctx.Err() != nil {
+				return
+			}
+			if chunk := typerSession.takeDeltas(); chunk != "" {
+				typeString(chunk)
+				typed.WriteString(chunk)
+			}
+		}
+		for {
+			select {
+			case <-typerSession.deltaReady:
+				typePending()
+			case drain := <-stopCh:
+				if drain {
+					typePending()
+				}
+				typedCh <- typed.String()
+				return
+			}
+		}
+	}()
+	typerStopped := false
+	stopTyper := func(drain bool) string {
+		if typerStopped {
+			return ""
+		}
+		typerStopped = true
+		stopCh <- drain
+		return <-typedCh
+	}
+	defer stopTyper(false)
+
+	t.emitState(stateCh, TaskStateRecording)
+	var buffered []int16
+	recording, err := recordAudioStream(t.ctx, t.stopRecordingCh, liveSampleRate, func(chunk []int16) error {
+		if session == nil {
+			select {
+			case prepared := <-sessionCh:
+				sessionTaken = true
+				if prepared.err != nil {
+					return prepared.err
+				}
+				session = prepared.session
+				transcriptionContext = prepared.transcriptionContext
+				if err := session.AppendPCM(t.ctx, buffered); err != nil {
+					return err
+				}
+				buffered = nil
+			default:
+				buffered = append(buffered, chunk...)
+				return nil
+			}
+		}
+		return session.AppendPCM(t.ctx, chunk)
+	})
+	if err != nil {
+		return err
+	}
+
+	t.emitState(stateCh, TaskStateFinalizing)
+	// Recording ended before the session came up: wait for it, then send the
+	// whole recording at once.
+	if session == nil {
+		prepared := <-sessionCh
+		sessionTaken = true
+		if prepared.err != nil {
+			return prepared.err
+		}
+		session = prepared.session
+		transcriptionContext = prepared.transcriptionContext
+		if err := session.AppendPCM(t.ctx, recording.Samples); err != nil {
+			return err
+		}
+	}
+
+	finalizeCtx, cancel := context.WithTimeout(t.ctx, 20*time.Second)
+	defer cancel()
+	transcript, err := session.CommitAndWait(finalizeCtx)
+	if err != nil {
+		return fmt.Errorf("finalizing live transcription: %w", err)
+	}
+
+	typed := stopTyper(true)
+	if remainder, ok := strings.CutPrefix(transcript, typed); ok {
+		if remainder != "" {
+			typeString(remainder)
+		}
+	} else {
+		log.Printf("Live transcript diverged from typed deltas, leaving typed text as-is.\ntyped: %q\nfinal: %q", typed, transcript)
+	}
+
+	result := NewTranscriptionResult()
+	result.Original = transcript
+	result.TranscriptionMode = TranscriptionModeLive
+	result.TranscriptionModel = liveTranscriptionModel
+	result.TranscriptionKeywords = transcriptionContext.Keywords
+	mp3Path, err := writeAudioRecordingToMP3(recording)
+	if err != nil {
+		log.Printf("Error writing live MP3 history: %v", err)
+	} else {
+		defer os.Remove(mp3Path)
+		attachMP3(result, mp3Path)
+	}
+	t.complete(result)
+	return nil
+}
+
+func collectTranscriptionContextAsync(ctx context.Context) <-chan TranscriptionContext {
+	contextCh := make(chan TranscriptionContext, 1)
+	go func() {
+		defer close(contextCh)
+		contextCh <- collectTranscriptionContext(ctx)
+	}()
+	return contextCh
+}
+
+func collectTranscriptionContext(ctx context.Context) TranscriptionContext {
+	if config.IncludeScreen {
+		description, err := describeScreen(ctx)
+		if err != nil {
+			log.Printf("Error describing screen: %v\n", err)
+			return NewTranscriptionContext("")
+		}
+		log.Printf("Screen Description: %s\n", description)
+		description += "\nPlease use the information about the user's screen to aid in transcribing the audio"
+		return NewTranscriptionContext(description)
+	}
+
+	if config.IncludeNvim {
+		nvimClient := NewNvimClient()
+		if err := nvimClient.FindActiveNvim(); err != nil {
+			log.Printf("nvim: %v", err)
+		} else {
+			log.Printf("Using nvim socket: %s", nvimClient.socketFile)
+			context, err := nvimClient.BuildTranscriptionContext()
+			if err != nil {
+				log.Printf("nvim context: %v", err)
+			} else {
+				log.Printf("nvim context: %s", context)
+				return NewTranscriptionContext(context)
+			}
+		}
+	}
+
+	if config.IncludeTmux {
+		context, err := BuildTmuxTranscriptionContext()
+		if err != nil {
+			log.Printf("tmux: %v", err)
+			return NewTranscriptionContext("")
+		}
+		log.Printf("tmux context: %s", context)
+		return NewTranscriptionContext(context)
+	}
+	return NewTranscriptionContext("")
+}
+
+func attachMP3(result *TranscriptionResult, mp3Path string) {
+	mp3Data, err := os.ReadFile(mp3Path)
+	log.Printf("MP3 data size: %d bytes, MP3 path: %s, error: %v\n", len(mp3Data), mp3Path, err)
+	if err == nil {
+		result.Mp3Recording = mp3Data
+	}
+}
+
+func (t *TranscribeTask) complete(result *TranscriptionResult) {
+	if transcriptionJSON, err := json.Marshal(result); err == nil {
+		log.Printf("Transcription: %s\n", transcriptionJSON)
+	}
+	t.SetResult(result)
+	taskManager.AppendToHistory(result)
 }

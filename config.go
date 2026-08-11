@@ -8,17 +8,33 @@ import (
 	"os"
 )
 
+type TranscriptionMode string
+
+const (
+	TranscriptionModeBuffered TranscriptionMode = "buffered"
+	TranscriptionModeLive     TranscriptionMode = "live"
+)
+
+func normalizeTranscriptionMode(mode TranscriptionMode) TranscriptionMode {
+	if mode == TranscriptionModeLive {
+		return TranscriptionModeLive
+	}
+	return TranscriptionModeBuffered
+}
+
 type Config struct {
-	OpenAIKey     string
-	ChatModel     string
-	IncludeScreen bool
-	IncludeNvim   bool
-	IncludeTmux   bool
-	ListenAddress string
+	OpenAIKey         string
+	ChatModel         string
+	TranscriptionMode TranscriptionMode
+	IncludeScreen     bool
+	IncludeNvim       bool
+	IncludeTmux       bool
+	ListenAddress     string
 }
 
 var config = Config{
-	ChatModel: "gpt-5.4-mini",
+	ChatModel:         "gpt-5.4-mini",
+	TranscriptionMode: TranscriptionModeBuffered,
 	// ListenAddress: "localhost:9898",
 	// IncludeScreen: true,
 	// IncludeNvim: true,
@@ -51,6 +67,7 @@ func readConfig() error {
 	if err := json.Unmarshal(byteValue, &config); err != nil {
 		return fmt.Errorf("Error unmarshalling config file: %v", err)
 	}
+	config.TranscriptionMode = normalizeTranscriptionMode(config.TranscriptionMode)
 
 	log.Printf("Configuration loaded: %s\n", configPath)
 

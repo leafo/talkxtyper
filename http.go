@@ -245,6 +245,8 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 			<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;">
 				<tr>
 					<th>UUID</th>
+					<th>Transcription Mode</th>
+					<th>Transcription Model</th>
 					<th>Original</th>
 					<th>Modified</th>
 					<th>Transcription Keywords</th>
@@ -255,6 +257,8 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 				{{range .History}}
 					<tr>
 						<td>{{.UUID}}</td>
+						<td>{{.TranscriptionMode}}</td>
+						<td>{{.TranscriptionModel}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{range .TranscriptionKeywords}}{{.}}

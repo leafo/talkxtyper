@@ -51,6 +51,21 @@ TalkXTyper registers the following global hotkeys:
 These actions are also available from the systray menu ("Record and Transcribe"
 and "Abort Recording").
 
+The systray's **Transcription mode** submenu switches between:
+
+- **Buffered — gpt-transcribe**: records the complete utterance and uploads it
+  after you stop.
+- **Live — gpt-live-transcribe**: starts recording immediately while a
+  Realtime transcription session is opened in the background. Audio buffers
+  locally until the session is ready, then streams as 24 kHz PCM, and the
+  transcript is typed incrementally as it arrives. Stopping commits the audio
+  turn and types any remaining text from the final transcript.
+
+The selected mode is saved in the configuration file. Context prompts, keyword
+hints, language hints, and MP3 history are used in both modes. The optional
+repair pass only runs in buffered mode: live mode types text as you speak, so
+it cannot be revised afterwards.
+
 ## Configuration
 
 The configuration for TalkXTyper is stored in a JSON file located in your user
@@ -59,6 +74,7 @@ configuration directory. The file is named `talkxtyper-config.json`.
 ### Configuration Options
 
 - `OpenAIKey`: Your API key for the OpenAI API.
+- `TranscriptionMode`: `"buffered"` (the default) or `"live"`.
 - `IncludeScreen`: A boolean value indicating whether to analyze the screen to augment the transcription. The config file will be updated automatically if you change this value in the program.
 - `IncludeNvim`: A boolean value indicating whether to analyze the screen to augment the transcription.
 
