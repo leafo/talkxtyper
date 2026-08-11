@@ -11,12 +11,13 @@ import (
 )
 
 type TranscriptionResult struct {
-	UUID         string
-	Original     string
-	Modified     string
-	RepairPrompt string
-	RepairModel  string
-	Mp3Recording []byte `json:"-"`
+	UUID                  string
+	Original              string
+	Modified              string
+	TranscriptionKeywords []string
+	RepairPrompt          string
+	RepairModel           string
+	Mp3Recording          []byte `json:"-"`
 }
 
 func NewTranscriptionResult() *TranscriptionResult {
@@ -90,13 +91,13 @@ func (t *TranscribeTask) Start() chan TaskState {
 
 		stateCh <- TaskStateRecording
 
-		descriptionCh := make(chan string, 1)
+		contextCh := make(chan TranscriptionContext, 1)
 
 		// Priority order: screen > nvim > tmux. Screen wins outright when
 		// enabled (it always works). Otherwise nvim is tried first; if it has
 		// no active instance, fall through to tmux.
 		go func() {
-			defer close(descriptionCh)
+			defer close(contextCh)
 
 			if config.IncludeScreen {
 				description, err := describeScreen(t.ctx)
@@ -106,7 +107,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 				}
 				log.Printf("Screen Description: %s\n", description)
 				description = description + "\nPlease use the information about the user's screen to aid in transcribing the audio"
-				descriptionCh <- description
+				contextCh <- NewTranscriptionContext(description)
 				return
 			}
 
@@ -121,7 +122,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 						log.Printf("nvim context: %v", err)
 					} else {
 						log.Printf("nvim context: %s", context)
-						descriptionCh <- context
+						contextCh <- NewTranscriptionContext(context)
 						return
 					}
 				}
@@ -134,7 +135,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 					return
 				}
 				log.Printf("tmux context: %s", context)
-				descriptionCh <- context
+				contextCh <- NewTranscriptionContext(context)
 			}
 		}()
 
@@ -154,12 +155,13 @@ func (t *TranscribeTask) Start() chan TaskState {
 		stateCh <- TaskStateTranscribing
 
 		log.Println("Audio ready, waiting for description")
-		var description string
-		for d := range descriptionCh {
-			description = d
+		transcriptionContext := NewTranscriptionContext("")
+		for context := range contextCh {
+			transcriptionContext = context
 		}
+		log.Printf("Transcription keywords: %q", transcriptionContext.Keywords)
 
-		transcription, err := transcribeAudio(t.ctx, mp3Path, description)
+		transcription, err := transcribeAudio(t.ctx, mp3Path, transcriptionContext)
 
 		if err != nil {
 			log.Printf("Error transcribing audio: %v\n", err)

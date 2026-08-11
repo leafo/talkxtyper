@@ -28,8 +28,9 @@ a variable on the screen named `my_variable`, saying "my variable" may produce
 2. **Provide context to the transcription model**
    The `gpt-transcribe` API accepts a free-form `prompt` plus keyword and
    language hints. TalkXTyper passes available screen, Neovim, or tmux context
-   into the transcription request and retains a second repair pass for
-   context-specific corrections.
+   into the transcription request, derives literal technical keyword hints,
+   and retains a second repair pass for context-specific corrections. Submitted
+   keywords are visible in the transcription history page.
 
 3. **Extract text from running app**
    Idea: Query what the currently focused app is, then have custom code to

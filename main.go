@@ -82,8 +82,8 @@ func main() {
 	readConfig()
 
 	if *transcribeFname != "" {
-		// read an audio file and send it to whisper api for transcription
-		transcription, err := transcribeAudio(context.Background(), *transcribeFname, "")
+		// Read an audio file and send it to the transcription API.
+		transcription, err := transcribeAudio(context.Background(), *transcribeFname, NewTranscriptionContext(""))
 		if err != nil {
 			log.Fatalf("Error transcribing file: %v", err)
 		}

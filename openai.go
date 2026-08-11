@@ -33,7 +33,7 @@ func getOpenAIClient() (*openai.Client, error) {
 // gpt-transcribe receives the available application context during transcription.
 // The second pass remains as a final correction step for identifiers and other
 // context-specific text.
-func transcribeAudio(ctx context.Context, mp3FilePath string, instructions string) (*TranscriptionResult, error) {
+func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionContext TranscriptionContext) (*TranscriptionResult, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing OpenAI client: %v", err)
@@ -48,10 +48,11 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 	req := openai.AudioTranscriptionNewParams{
 		File:      audioFile,
 		Model:     "gpt-transcribe",
-		Languages: []string{"en"},
+		Keywords:  transcriptionContext.Keywords,
+		Languages: transcriptionContext.Languages,
 	}
-	if instructions != "" {
-		req.Prompt = openai.String(instructions)
+	if transcriptionContext.Prompt != "" {
+		req.Prompt = openai.String(transcriptionContext.Prompt)
 	}
 
 	resp, err := client.Audio.Transcriptions.New(ctx, req)
@@ -62,11 +63,12 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, instructions strin
 	result := NewTranscriptionResult()
 
 	result.Original = resp.Text
+	result.TranscriptionKeywords = transcriptionContext.Keywords
 
-	if instructions != "" {
-		result.RepairPrompt = instructions
+	if transcriptionContext.Prompt != "" {
+		result.RepairPrompt = transcriptionContext.Prompt
 		result.RepairModel = config.ChatModel
-		fixedText, err := fixTranscription(ctx, resp.Text, instructions)
+		fixedText, err := fixTranscription(ctx, resp.Text, transcriptionContext.Prompt)
 		if err != nil {
 			return nil, fmt.Errorf("Error fixing transcription: %v", err)
 		}
@@ -123,7 +125,7 @@ func describeImage(ctx context.Context, imagePath string) (string, error) {
 
 	req := responses.ResponseNewParams{
 		Model:        config.ChatModel,
-		Instructions: openai.String("You are a voice to text typing assistant who is collecting text on the user's current screen so that a machine generated transcription can be edited to match any phrases appearing on the screen. Include 1 sentence description of what the user is engaging with. Then list out all relevant keywords/names/words that appear in the provided image so that the transcription may be corrected."),
+		Instructions: openai.String("You are a voice to text typing assistant collecting context from the user's screen to improve transcription. Write one sentence describing what the user is doing. Then write a heading exactly `Keywords:` followed by one relevant literal name, identifier, command, path, acronym, or short technical phrase per line, each prefixed with `- `. Include only terms that visibly appear in the image."),
 		Input: responses.ResponseNewParamsInputUnion{
 			OfInputItemList: responses.ResponseInputParam{
 				responses.ResponseInputItemParamOfMessage(
