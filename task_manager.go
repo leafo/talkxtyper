@@ -83,7 +83,10 @@ func (tm *TaskManager) Abort() {
 }
 
 func (tm *TaskManager) GetContext() string {
-	return *tm.context.Load()
+	if ctx := tm.context.Load(); ctx != nil {
+		return *ctx
+	}
+	return ""
 }
 
 func (tm *TaskManager) SetContext(ctx string) {

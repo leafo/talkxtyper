@@ -208,8 +208,8 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	}()
 
 	// Deltas are typed the moment they arrive; there is no repair pass since
-	// typed text cannot be revised. Cancellation is checked before every type
-	// so an abort stops typing immediately and discards anything buffered.
+	// typed text cannot be revised. An abort must stop typing immediately and
+	// discard anything still buffered.
 	stopCh := make(chan bool)
 	typedCh := make(chan string, 1)
 	go func() {
@@ -344,15 +344,26 @@ func collectTranscriptionContextAsync(ctx context.Context) <-chan TranscriptionC
 }
 
 func collectTranscriptionContext(ctx context.Context) TranscriptionContext {
+	prompt := collectContextPrompt(ctx)
+	transcriptionContext := NewTranscriptionContext(prompt)
+
+	// The manually set context (HTTP /context page) only contributes keyword
+	// hints; it does not enter the prompt.
+	if manual := taskManager.GetContext(); manual != "" {
+		transcriptionContext.Keywords = extractTranscriptionKeywords(prompt + "\n" + manual)
+	}
+	return transcriptionContext
+}
+
+func collectContextPrompt(ctx context.Context) string {
 	if config.IncludeScreen {
 		description, err := describeScreen(ctx)
 		if err != nil {
 			log.Printf("Error describing screen: %v\n", err)
-			return NewTranscriptionContext("")
+			return ""
 		}
 		log.Printf("Screen Description: %s\n", description)
-		description += "\nPlease use the information about the user's screen to aid in transcribing the audio"
-		return NewTranscriptionContext(description)
+		return description + "\nPlease use the information about the user's screen to aid in transcribing the audio"
 	}
 
 	if config.IncludeNvim {
@@ -366,7 +377,7 @@ func collectTranscriptionContext(ctx context.Context) TranscriptionContext {
 				log.Printf("nvim context: %v", err)
 			} else {
 				log.Printf("nvim context: %s", context)
-				return NewTranscriptionContext(context)
+				return context
 			}
 		}
 	}
@@ -375,12 +386,12 @@ func collectTranscriptionContext(ctx context.Context) TranscriptionContext {
 		context, err := BuildTmuxTranscriptionContext()
 		if err != nil {
 			log.Printf("tmux: %v", err)
-			return NewTranscriptionContext("")
+			return ""
 		}
 		log.Printf("tmux context: %s", context)
-		return NewTranscriptionContext(context)
+		return context
 	}
-	return NewTranscriptionContext("")
+	return ""
 }
 
 func attachMP3(result *TranscriptionResult, mp3Path string) {

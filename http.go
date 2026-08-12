@@ -37,7 +37,7 @@ var contextPageTemplate = template.Must(template.New("context").Parse(`
 	</head>
 	<body>
 		<h1>Current Context</h1>
-		<p>The context is sent alongside transcription to help with understanding the user's intent. It can include keywords or other relevant strings.</p>
+		<p>Keywords extracted from this text are sent as hints with every transcription. Use a <code>Keywords:</code> heading with <code>- </code> list items to include terms verbatim.</p>
 		<pre>{{.}}</pre>
 		<form method="POST" action="/context">
 			<label for="context">Set Context:</label><br>
