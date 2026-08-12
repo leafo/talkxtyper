@@ -33,7 +33,7 @@ type Config struct {
 }
 
 var config = Config{
-	ChatModel:         "gpt-5.4-mini",
+	ChatModel:         "gpt-5.6-luna",
 	TranscriptionMode: TranscriptionModeBuffered,
 	// ListenAddress: "localhost:9898",
 	// IncludeScreen: true,
