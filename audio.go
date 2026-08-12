@@ -18,7 +18,9 @@ import (
 const sampleRate = 44100
 const liveSampleRate = 24000
 const bufferSize = 256
-const maxRecordSeconds = 30
+// Safety net for a forgotten hot mic. Hitting it acts like pressing stop:
+// the recording is kept and transcribed, not discarded.
+const maxRecordSeconds = 300
 const minRecordSeconds = 1
 const debug = false
 
@@ -30,8 +32,8 @@ type AudioRecording struct {
 // recordAudioStream captures mono PCM16 audio. When onChunk is non-nil, copied
 // chunks are delivered from a worker goroutine so PortAudio's callback never
 // blocks on network I/O.
-func recordAudioStream(ctx context.Context, stopCh <-chan struct{}, recordingSampleRate int, onChunk func([]int16) error) (AudioRecording, error) {
-	ctx, cancel := context.WithTimeout(ctx, maxRecordSeconds*time.Second)
+func recordAudioStream(parentCtx context.Context, stopCh <-chan struct{}, recordingSampleRate int, onChunk func([]int16) error) (AudioRecording, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, maxRecordSeconds*time.Second)
 	defer cancel()
 
 	err := portaudio.Initialize()
@@ -146,7 +148,10 @@ func recordAudioStream(ctx context.Context, stopCh <-chan struct{}, recordingSam
 		return AudioRecording{}, err
 	}
 	if ctx.Err() != nil {
-		return AudioRecording{}, fmt.Errorf("Recording cancelled")
+		if parentCtx.Err() != nil {
+			return AudioRecording{}, fmt.Errorf("Recording cancelled")
+		}
+		log.Printf("Max recording length reached (%ds), stopping", maxRecordSeconds)
 	}
 
 	if time.Since(startTime) < minRecordSeconds*time.Second {
