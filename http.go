@@ -247,10 +247,12 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 					<th>UUID</th>
 					<th>Transcription Mode</th>
 					<th>Transcription Model</th>
+					<th>Transcription Time</th>
 					<th>Original</th>
 					<th>Modified</th>
 					<th>Transcription Keywords</th>
 					<th>Repair Model</th>
+					<th>Repair Time</th>
 					<th>Repair Prompt</th>
 					<th>MP3 Recording</th>
 				</tr>
@@ -259,11 +261,13 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 						<td>{{.UUID}}</td>
 						<td>{{.TranscriptionMode}}</td>
 						<td>{{.TranscriptionModel}}</td>
+						<td>{{if .TranscriptionElapsed}}{{.TranscriptionElapsed}}{{end}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
 						<td><pre style="white-space: pre-wrap;">{{range .TranscriptionKeywords}}{{.}}
 {{end}}</pre></td>
 						<td>{{.RepairModel}}</td>
+						<td>{{if .RepairElapsed}}{{.RepairElapsed}}{{end}}</td>
 						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
 						<td>
 							{{if .Mp3Recording}}

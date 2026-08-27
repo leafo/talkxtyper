@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -63,7 +65,10 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionConte
 		req.Prompt = openai.String(transcriptionContext.Prompt)
 	}
 
+	transcribeStart := time.Now()
 	resp, err := client.Audio.Transcriptions.New(ctx, req)
+	transcribeElapsed := time.Since(transcribeStart)
+	log.Printf("Transcription (%s) took %s\n", req.Model, transcribeElapsed)
 	if err != nil {
 		return nil, fmt.Errorf("Error sending transcription request: %v", err)
 	}
@@ -72,25 +77,27 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionConte
 	result.Original = resp.Text
 	result.TranscriptionMode = TranscriptionModeBuffered
 	result.TranscriptionModel = "gpt-transcribe"
+	result.TranscriptionElapsed = transcribeElapsed
 	result.TranscriptionKeywords = transcriptionContext.Keywords
 
 	if transcriptionContext.Prompt != "" {
 		result.RepairPrompt = transcriptionContext.Prompt
 		result.RepairModel = config.ChatModel
-		fixedText, err := fixTranscription(ctx, resp.Text, transcriptionContext.Prompt)
+		fixedText, repairElapsed, err := fixTranscription(ctx, resp.Text, transcriptionContext.Prompt)
 		if err != nil {
 			return nil, fmt.Errorf("Error fixing transcription: %v", err)
 		}
 		result.Modified = fixedText
+		result.RepairElapsed = repairElapsed
 	}
 
 	return result, nil
 }
 
-func fixTranscription(ctx context.Context, transcribedText string, instructions string) (string, error) {
+func fixTranscription(ctx context.Context, transcribedText string, instructions string) (string, time.Duration, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
-		return "", fmt.Errorf("Error initializing OpenAI client: %v", err)
+		return "", 0, fmt.Errorf("Error initializing OpenAI client: %v", err)
 	}
 
 	req := responses.ResponseNewParams{
@@ -101,16 +108,19 @@ func fixTranscription(ctx context.Context, transcribedText string, instructions 
 		Store:           openai.Bool(false),
 	}
 
+	repairStart := time.Now()
 	resp, err := client.Responses.New(ctx, req)
+	repairElapsed := time.Since(repairStart)
+	log.Printf("Repair (%s) took %s\n", req.Model, repairElapsed)
 	if err != nil {
-		return "", fmt.Errorf("Error sending transcription fix request: %v", err)
+		return "", repairElapsed, fmt.Errorf("Error sending transcription fix request: %v", err)
 	}
 
 	text := resp.OutputText()
 	if text == "" {
-		return "", fmt.Errorf("Transcription fix returned no text")
+		return "", repairElapsed, fmt.Errorf("Transcription fix returned no text")
 	}
-	return text, nil
+	return text, repairElapsed, nil
 }
 
 func describeImage(ctx context.Context, imagePath string) (string, error) {

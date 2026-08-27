@@ -20,9 +20,11 @@ type TranscriptionResult struct {
 	Modified              string
 	TranscriptionMode     TranscriptionMode
 	TranscriptionModel    string
+	TranscriptionElapsed  time.Duration
 	TranscriptionKeywords []string
 	RepairPrompt          string
 	RepairModel           string
+	RepairElapsed         time.Duration
 	Mp3Recording          []byte `json:"-"`
 }
 
