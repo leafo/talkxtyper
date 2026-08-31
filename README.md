@@ -1,9 +1,9 @@
 # TalkXTyper
 
 TalkXTyper is a desktop application that will, on command, record your voice,
-transcribe it using the OpenAI transcription API, and "type" it to your computer. It
-is activated with a global hotkey so that you do not lose focus on the area
-you're typing into.
+transcribe it using an OpenAI or Gemini transcription API, and "type" it to your
+computer. It is activated with a global hotkey so that you do not lose focus on
+the area you're typing into.
 
 ## Rationale
 
@@ -51,20 +51,21 @@ TalkXTyper registers the following global hotkeys:
 These actions are also available from the systray menu ("Record and Transcribe"
 and "Abort Recording").
 
-The systray's **Transcription mode** submenu switches between:
+The systray's **Transcription** submenu switches between four profiles:
 
-- **Buffered — gpt-transcribe**: records the complete utterance and uploads it
-  after you stop.
-- **Live — gpt-live-transcribe**: starts recording immediately while a
-  Realtime transcription session is opened in the background. Audio buffers
-  locally until the session is ready, then streams as 24 kHz PCM, and the
-  transcript is typed incrementally as it arrives. Stopping commits the audio
-  turn and types any remaining text from the final transcript.
+- **Buffered — OpenAI gpt-transcribe** and **Buffered — Gemini 3.5
+  Transcribe** record the complete utterance and upload it after you stop.
+- **Live — OpenAI gpt-live-transcribe** streams 24 kHz PCM and types
+  incremental transcript deltas.
+- **Live — Gemini 3.5 Transcribe** streams 16 kHz PCM and types finalized
+  phrases as they arrive. Gemini's speculative interim hypotheses are not typed
+  because the service may revise them.
 
-The selected mode is saved in the configuration file. Context prompts, keyword
-hints, language hints, and MP3 history are used in both modes. The optional
-repair pass only runs in buffered mode: live mode types text as you speak, so
-it cannot be revised afterwards.
+The selected provider and mode are saved in the configuration file. Keyword and
+language hints and MP3 history are used with every profile. OpenAI also receives
+the free-form context prompt; Gemini receives the extracted terms as custom
+vocabulary. The optional repair pass only runs in buffered mode: live mode types
+text as you speak, so it cannot be revised afterwards.
 
 ## Configuration
 
@@ -74,9 +75,17 @@ configuration directory. The file is named `talkxtyper-config.json`.
 ### Configuration Options
 
 - `OpenAIKey`: Your API key for the OpenAI API.
+- `GeminiKey`: Your Gemini API key. `GEMINI_API_KEY` and `GOOGLE_API_KEY`
+  environment variables take precedence over this value.
+- `TranscriptionProvider`: `"openai"` (the default) or `"gemini"`.
 - `TranscriptionMode`: `"buffered"` (the default) or `"live"`.
 - `IncludeScreen`: A boolean value indicating whether to analyze the screen to augment the transcription. The config file will be updated automatically if you change this value in the program.
 - `IncludeNvim`: A boolean value indicating whether to analyze the screen to augment the transcription.
+- `IncludeTmux`: A boolean value indicating whether to collect context from the active tmux pane.
+
+Screen description and the buffered context-repair pass still use OpenAI, even
+when Gemini is selected for transcription. An OpenAI key is therefore also
+required when those context features are enabled.
 
 ## Web interface
 

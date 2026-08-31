@@ -39,7 +39,7 @@ func TestLiveTranscriptionSession(t *testing.T) {
 		Keywords:  []string{"request_id", "AC-42"},
 		Languages: []string{"en"},
 	}
-	samples := make([]int16, liveAudioChunkSamples+2)
+	samples := make([]int16, openAILiveAudioChunkSamples+2)
 	samples[0] = 0x1234
 	samples[len(samples)-2] = -2
 	samples[len(samples)-1] = 0x0102
@@ -100,11 +100,11 @@ func TestLiveTranscriptionSession(t *testing.T) {
 			serverErr <- fmt.Errorf("unexpected session update: %+v", update)
 			return
 		}
-		if update.Session.Audio.Input.Format != (realtimePCMFormat{Type: "audio/pcm", Rate: liveSampleRate}) {
+		if update.Session.Audio.Input.Format != (realtimePCMFormat{Type: "audio/pcm", Rate: openAILiveSampleRate}) {
 			serverErr <- fmt.Errorf("unexpected audio format: %+v", update.Session.Audio.Input.Format)
 			return
 		}
-		if settings.Model != liveTranscriptionModel || settings.Prompt != expectedContext.Prompt || settings.Delay != "low" {
+		if settings.Model != openAILiveTranscriptionModel || settings.Prompt != expectedContext.Prompt || settings.Delay != "low" {
 			serverErr <- fmt.Errorf("unexpected transcription settings: %+v", settings)
 			return
 		}
@@ -176,7 +176,7 @@ func TestLiveTranscriptionSession(t *testing.T) {
 	defer cancel()
 	clientSecretEndpoint := server.URL + "/v1/realtime/client_secrets"
 	websocketEndpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/v1/realtime"
-	session, err := newLiveTranscriptionSession(ctx, "test-key", clientSecretEndpoint, websocketEndpoint)
+	session, err := newOpenAILiveTranscriptionSession(ctx, "test-key", clientSecretEndpoint, websocketEndpoint)
 	if err != nil {
 		t.Fatal(err)
 	}

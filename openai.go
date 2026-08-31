@@ -43,7 +43,7 @@ func getOpenAIAPIKey() (string, error) {
 // gpt-transcribe receives the available application context during transcription.
 // The second pass remains as a final correction step for identifiers and other
 // context-specific text.
-func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionContext TranscriptionContext) (*TranscriptionResult, error) {
+func transcribeOpenAIAudio(ctx context.Context, mp3FilePath string, transcriptionContext TranscriptionContext) (*TranscriptionResult, error) {
 	client, err := getOpenAIClient()
 	if err != nil {
 		return nil, fmt.Errorf("Error initializing OpenAI client: %v", err)
@@ -75,6 +75,7 @@ func transcribeAudio(ctx context.Context, mp3FilePath string, transcriptionConte
 
 	result := NewTranscriptionResult()
 	result.Original = resp.Text
+	result.TranscriptionProvider = TranscriptionProviderOpenAI
 	result.TranscriptionMode = TranscriptionModeBuffered
 	result.TranscriptionModel = "gpt-transcribe"
 	result.TranscriptionElapsed = transcribeElapsed

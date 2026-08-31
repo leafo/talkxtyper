@@ -16,7 +16,7 @@ import (
 )
 
 const sampleRate = 44100
-const liveSampleRate = 24000
+const openAILiveSampleRate = 24000
 const bufferSize = 256
 // Safety net for a forgotten hot mic. Hitting it acts like pressing stop:
 // the recording is kept and transcribed, not discarded.

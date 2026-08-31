@@ -33,7 +33,10 @@ var taskManager = TaskManager{
 }
 
 func (tm *TaskManager) StartNewTask() *TranscribeTask {
-	newTask := NewTranscribeTask(normalizeTranscriptionMode(config.TranscriptionMode))
+	newTask := NewTranscribeTask(
+		normalizeTranscriptionProvider(config.TranscriptionProvider),
+		normalizeTranscriptionMode(config.TranscriptionMode),
+	)
 
 	oldTask := tm.currentTask.Swap(newTask)
 

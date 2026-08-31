@@ -83,7 +83,7 @@ func main() {
 
 	if *transcribeFname != "" {
 		// Read an audio file and send it to the transcription API.
-		transcription, err := transcribeAudio(context.Background(), *transcribeFname, NewTranscriptionContext(""))
+		transcription, err := transcribeAudio(context.Background(), config.TranscriptionProvider, *transcribeFname, NewTranscriptionContext(""))
 		if err != nil {
 			log.Fatalf("Error transcribing file: %v", err)
 		}
@@ -203,7 +203,7 @@ func onReady() {
 	toggleHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
 	recordHotkeyLabel := ""
 	if err := toggleHotkey.Register(); err != nil {
-		log.Printf("Failed to register toggle hotkey: %v", err)
+		notifyError("Could not register the record hotkey (Alt+B)", err)
 	} else {
 		log.Println("Toggle recording: Alt+B")
 		recordHotkeyLabel = " (Alt+B)"
@@ -211,7 +211,7 @@ func onReady() {
 
 	abortHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
 	if err := abortHotkey.Register(); err != nil {
-		log.Printf("Failed to register abort hotkey: %v", err)
+		notifyError("Could not register the abort hotkey (Alt+C)", err)
 	} else {
 		log.Println("Abort recording: Alt+C")
 	}
@@ -219,9 +219,33 @@ func onReady() {
 	mRecord := systray.AddMenuItem("Record and Transcribe"+recordHotkeyLabel, "Start recording and transcribing")
 	mAbort := systray.AddMenuItem("Abort Recording", "Abort the current recording")
 	mAbort.Hide()
-	mTranscriptionMode := systray.AddMenuItem("Transcription mode: "+transcriptionModeLabel(config.TranscriptionMode), "Choose buffered file transcription or live streaming transcription")
-	mBufferedMode := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — gpt-transcribe", "Record first, then upload the completed audio file", config.TranscriptionMode != TranscriptionModeLive)
-	mLiveMode := mTranscriptionMode.AddSubMenuItemCheckbox("Live — gpt-live-transcribe", "Type the transcript as you speak; no repair pass", config.TranscriptionMode == TranscriptionModeLive)
+	mTranscriptionMode := systray.AddMenuItem("Transcription: "+transcriptionProfileLabel(config.TranscriptionProvider, config.TranscriptionMode), "Choose a transcription provider and delivery mode")
+	mOpenAIBuffered := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — OpenAI gpt-transcribe", "Record first, then upload the completed audio file", transcriptionProfileSelected(TranscriptionProviderOpenAI, TranscriptionModeBuffered))
+	mOpenAILive := mTranscriptionMode.AddSubMenuItemCheckbox("Live — OpenAI gpt-live-transcribe", "Type the transcript as it is finalized; no repair pass", transcriptionProfileSelected(TranscriptionProviderOpenAI, TranscriptionModeLive))
+	mGeminiBuffered := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — Gemini 3.5 Transcribe", "Record first, then upload the completed audio file", transcriptionProfileSelected(TranscriptionProviderGemini, TranscriptionModeBuffered))
+	mGeminiLive := mTranscriptionMode.AddSubMenuItemCheckbox("Live — Gemini 3.5 Transcribe", "Type finalized phrases while you speak; no repair pass", transcriptionProfileSelected(TranscriptionProviderGemini, TranscriptionModeLive))
+	transcriptionItems := []*systray.MenuItem{mOpenAIBuffered, mOpenAILive, mGeminiBuffered, mGeminiLive}
+	setTranscriptionProfile := func(provider TranscriptionProvider, mode TranscriptionMode) {
+		config.TranscriptionProvider = normalizeTranscriptionProvider(provider)
+		config.TranscriptionMode = normalizeTranscriptionMode(mode)
+		for _, item := range transcriptionItems {
+			item.Uncheck()
+		}
+		switch {
+		case provider == TranscriptionProviderGemini && mode == TranscriptionModeLive:
+			mGeminiLive.Check()
+		case provider == TranscriptionProviderGemini:
+			mGeminiBuffered.Check()
+		case mode == TranscriptionModeLive:
+			mOpenAILive.Check()
+		default:
+			mOpenAIBuffered.Check()
+		}
+		mTranscriptionMode.SetTitle("Transcription: " + transcriptionProfileLabel(provider, mode))
+		if err := writeConfig(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+		}
+	}
 
 	mIncludeScreen := systray.AddMenuItemCheckbox("1. Include screen", "Highest priority. Sends a screenshot description; skips nvim/tmux when enabled.", config.IncludeScreen)
 	mIncludeNvim := systray.AddMenuItemCheckbox("2. Include nvim", "Tried before tmux. Falls through to tmux if no active nvim is found.", config.IncludeNvim)
@@ -253,8 +277,9 @@ func onReady() {
 					}
 					mRecord.SetTitle("Stop recording" + recordHotkeyLabel)
 					mAbort.Show()
-					mBufferedMode.Disable()
-					mLiveMode.Disable()
+					for _, item := range transcriptionItems {
+						item.Disable()
+					}
 				case TaskStateTranscribing:
 					systray.SetTooltip("Transcribing audio...")
 					systray.SetIcon(icon_green)
@@ -266,8 +291,9 @@ func onReady() {
 					systray.SetIcon(icon_blue)
 					mRecord.SetTitle("Record and Transcribe" + recordHotkeyLabel)
 					mAbort.Hide()
-					mBufferedMode.Enable()
-					mLiveMode.Enable()
+					for _, item := range transcriptionItems {
+						item.Enable()
+					}
 				}
 
 			case transcription := <-taskManager.transcriptionRes:
@@ -288,23 +314,14 @@ func onReady() {
 			case <-mAbort.ClickedCh:
 				taskManager.Abort()
 
-			case <-mBufferedMode.ClickedCh:
-				config.TranscriptionMode = TranscriptionModeBuffered
-				mBufferedMode.Check()
-				mLiveMode.Uncheck()
-				mTranscriptionMode.SetTitle("Transcription mode: " + transcriptionModeLabel(config.TranscriptionMode))
-				if err := writeConfig(); err != nil {
-					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
-				}
-
-			case <-mLiveMode.ClickedCh:
-				config.TranscriptionMode = TranscriptionModeLive
-				mLiveMode.Check()
-				mBufferedMode.Uncheck()
-				mTranscriptionMode.SetTitle("Transcription mode: " + transcriptionModeLabel(config.TranscriptionMode))
-				if err := writeConfig(); err != nil {
-					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
-				}
+			case <-mOpenAIBuffered.ClickedCh:
+				setTranscriptionProfile(TranscriptionProviderOpenAI, TranscriptionModeBuffered)
+			case <-mOpenAILive.ClickedCh:
+				setTranscriptionProfile(TranscriptionProviderOpenAI, TranscriptionModeLive)
+			case <-mGeminiBuffered.ClickedCh:
+				setTranscriptionProfile(TranscriptionProviderGemini, TranscriptionModeBuffered)
+			case <-mGeminiLive.ClickedCh:
+				setTranscriptionProfile(TranscriptionProviderGemini, TranscriptionModeLive)
 
 			case <-mIncludeScreen.ClickedCh:
 				if mIncludeScreen.Checked() {
@@ -347,7 +364,7 @@ func onReady() {
 
 			case <-openHTTPCh:
 				if err := openHTTPInterface(config.ListenAddress); err != nil {
-					log.Printf("Failed to open HTTP interface: %v", err)
+					notifyError("Could not open the HTTP interface", err)
 				}
 
 			case <-mExit.ClickedCh:
@@ -363,6 +380,19 @@ func transcriptionModeLabel(mode TranscriptionMode) string {
 		return "Live"
 	}
 	return "Buffered"
+}
+
+func transcriptionProfileSelected(provider TranscriptionProvider, mode TranscriptionMode) bool {
+	return normalizeTranscriptionProvider(config.TranscriptionProvider) == provider &&
+		normalizeTranscriptionMode(config.TranscriptionMode) == mode
+}
+
+func transcriptionProfileLabel(provider TranscriptionProvider, mode TranscriptionMode) string {
+	providerLabel := "OpenAI"
+	if normalizeTranscriptionProvider(provider) == TranscriptionProviderGemini {
+		providerLabel = "Gemini"
+	}
+	return providerLabel + " / " + transcriptionModeLabel(mode)
 }
 
 func typeString(input string) error {

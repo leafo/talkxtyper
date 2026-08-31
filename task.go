@@ -18,6 +18,7 @@ type TranscriptionResult struct {
 	UUID                  string
 	Original              string
 	Modified              string
+	TranscriptionProvider TranscriptionProvider
 	TranscriptionMode     TranscriptionMode
 	TranscriptionModel    string
 	TranscriptionElapsed  time.Duration
@@ -48,18 +49,20 @@ type TranscribeTask struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	result            *TranscriptionResult
+	provider          TranscriptionProvider
 	mode              TranscriptionMode
 	state             atomic.Int32
 	mu                sync.Mutex
 }
 
 // TODO: this should take a context
-func NewTranscribeTask(mode TranscriptionMode) *TranscribeTask {
+func NewTranscribeTask(provider TranscriptionProvider, mode TranscriptionMode) *TranscribeTask {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TranscribeTask{
-		ctx:    ctx,
-		cancel: cancel,
-		mode:   normalizeTranscriptionMode(mode),
+		ctx:      ctx,
+		cancel:   cancel,
+		provider: normalizeTranscriptionProvider(provider),
+		mode:     normalizeTranscriptionMode(mode),
 	}
 }
 
@@ -117,7 +120,7 @@ func (t *TranscribeTask) Start() chan TaskState {
 			err = t.runBuffered(stateCh)
 		}
 		if err != nil && t.ctx.Err() == nil {
-			log.Printf("Transcription task failed: %v\n", err)
+			notifyError("Transcription failed", err)
 		}
 	}()
 
@@ -143,9 +146,9 @@ func (t *TranscribeTask) runBuffered(stateCh chan<- TaskState) error {
 	transcriptionContext := <-contextCh
 	log.Printf("Transcription keywords: %q", transcriptionContext.Keywords)
 
-	result, err := transcribeAudio(t.ctx, mp3Path, transcriptionContext)
+	result, err := transcribeAudio(t.ctx, t.provider, mp3Path, transcriptionContext)
 	if err != nil {
-		return fmt.Errorf("transcribing audio: %w", err)
+		return err
 	}
 	attachMP3(result, mp3Path)
 	t.complete(result)
@@ -155,34 +158,28 @@ func (t *TranscribeTask) runBuffered(stateCh chan<- TaskState) error {
 func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	contextCh := collectTranscriptionContextAsync(t.ctx)
 
-	// Recording starts immediately; session setup and context collection run
-	// concurrently with it. Audio buffers locally until the session is
+	// Recording starts immediately while context collection and session setup
+	// happen in the background. Audio buffers locally until the provider is
 	// configured, then flushes and streams from there.
 	type preparedSession struct {
-		session              *liveTranscriptionSession
+		session              liveTranscriptionSessionAPI
 		transcriptionContext TranscriptionContext
+		model                string
 		err                  error
 	}
 	sessionCh := make(chan preparedSession, 1)
-	typerSessionCh := make(chan *liveTranscriptionSession, 1)
+	typerSessionCh := make(chan liveTranscriptionSessionAPI, 1)
 	go func() {
 		var prepared preparedSession
 		prepared.err = func() error {
-			apiKey, err := getOpenAIAPIKey()
+			session, model, transcriptionContext, err := newConfiguredLiveTranscriptionSession(t.ctx, t.provider, contextCh)
+			prepared.transcriptionContext = transcriptionContext
 			if err != nil {
 				return err
-			}
-			session, err := newLiveTranscriptionSession(t.ctx, apiKey, openAIClientSecretURL, openAIRealtimeWebSocketURL)
-			if err != nil {
-				return err
-			}
-			prepared.transcriptionContext = <-contextCh
-			if err := session.Configure(t.ctx, prepared.transcriptionContext); err != nil {
-				session.Close()
-				return fmt.Errorf("configuring live transcription: %w", err)
 			}
 			log.Printf("Live transcription keywords: %q", prepared.transcriptionContext.Keywords)
 			prepared.session = session
+			prepared.model = model
 			return nil
 		}()
 		if prepared.session != nil {
@@ -193,8 +190,9 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 		sessionCh <- prepared
 	}()
 
-	var session *liveTranscriptionSession
+	var session liveTranscriptionSessionAPI
 	var transcriptionContext TranscriptionContext
+	var transcriptionModel string
 	sessionTaken := false
 	defer func() {
 		if session != nil {
@@ -216,7 +214,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	typedCh := make(chan string, 1)
 	go func() {
 		var typed strings.Builder
-		var typerSession *liveTranscriptionSession
+		var typerSession liveTranscriptionSessionAPI
 		select {
 		case typerSession = <-typerSessionCh:
 		case <-stopCh:
@@ -239,7 +237,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 		}
 		for {
 			select {
-			case <-typerSession.deltaReady:
+			case <-typerSession.deltaReadyCh():
 				typePending()
 			case drain := <-stopCh:
 				if drain {
@@ -263,7 +261,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 
 	t.emitState(stateCh, TaskStateRecording)
 	var buffered []int16
-	recording, err := recordAudioStream(t.ctx, t.stopRecordingCh, liveSampleRate, func(chunk []int16) error {
+	recording, err := recordAudioStream(t.ctx, t.stopRecordingCh, liveSampleRate(t.provider), func(chunk []int16) error {
 		if session == nil {
 			select {
 			case prepared := <-sessionCh:
@@ -273,6 +271,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 				}
 				session = prepared.session
 				transcriptionContext = prepared.transcriptionContext
+				transcriptionModel = prepared.model
 				if err := session.AppendPCM(t.ctx, buffered); err != nil {
 					return err
 				}
@@ -299,6 +298,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 		}
 		session = prepared.session
 		transcriptionContext = prepared.transcriptionContext
+		transcriptionModel = prepared.model
 		if err := session.AppendPCM(t.ctx, recording.Samples); err != nil {
 			return err
 		}
@@ -322,8 +322,9 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 
 	result := NewTranscriptionResult()
 	result.Original = transcript
+	result.TranscriptionProvider = t.provider
 	result.TranscriptionMode = TranscriptionModeLive
-	result.TranscriptionModel = liveTranscriptionModel
+	result.TranscriptionModel = transcriptionModel
 	result.TranscriptionKeywords = transcriptionContext.Keywords
 	mp3Path, err := writeAudioRecordingToMP3(recording)
 	if err != nil {
@@ -361,7 +362,9 @@ func collectContextPrompt(ctx context.Context) string {
 	if config.IncludeScreen {
 		description, err := describeScreen(ctx)
 		if err != nil {
-			log.Printf("Error describing screen: %v\n", err)
+			// Transcription still runs, just without screen context, so the
+			// failure would otherwise be invisible.
+			notifyError("Could not read screen context", err)
 			return ""
 		}
 		log.Printf("Screen Description: %s\n", description)

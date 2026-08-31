@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,27 +17,21 @@ import (
 )
 
 const (
-	liveTranscriptionModel     = "gpt-live-transcribe"
-	liveAudioChunkSamples      = liveSampleRate / 10 // 100 ms
-	openAIClientSecretURL      = "https://api.openai.com/v1/realtime/client_secrets"
-	openAIRealtimeWebSocketURL = "wss://api.openai.com/v1/realtime"
-	liveSetupTimeout           = 15 * time.Second
+	openAILiveTranscriptionModel = "gpt-live-transcribe"
+	openAILiveAudioChunkSamples  = openAILiveSampleRate / 10 // 100 ms
+	openAIClientSecretURL        = "https://api.openai.com/v1/realtime/client_secrets"
+	openAIRealtimeWebSocketURL   = "wss://api.openai.com/v1/realtime"
+	liveSetupTimeout             = 15 * time.Second
 )
 
-type liveTranscriptionSession struct {
+type openAILiveTranscriptionSession struct {
+	*liveDeltaBuffer
 	conn      *websocket.Conn
 	writeMu   sync.Mutex
-	pending   []int16
+	chunker   pcmChunker
 	events    chan realtimeServerEvent
 	readErr   chan error
 	closeOnce sync.Once
-
-	// Delta text accumulates here instead of a channel so the socket reader
-	// never blocks behind keyboard injection; a slow consumer just takes a
-	// larger coalesced chunk on its next read.
-	deltaMu    sync.Mutex
-	deltaBuf   strings.Builder
-	deltaReady chan struct{}
 }
 
 type realtimeServerEvent struct {
@@ -111,7 +104,7 @@ type realtimeSimpleEvent struct {
 	Type string `json:"type"`
 }
 
-func newLiveTranscriptionSession(ctx context.Context, apiKey, clientSecretEndpoint, websocketEndpoint string) (*liveTranscriptionSession, error) {
+func newOpenAILiveTranscriptionSession(ctx context.Context, apiKey, clientSecretEndpoint, websocketEndpoint string) (*openAILiveTranscriptionSession, error) {
 	// The setup timeout only bounds the handshake steps. readEvents gets the
 	// parent ctx because it must outlive setup for the whole session.
 	setupCtx, cancel := context.WithTimeout(ctx, liveSetupTimeout)
@@ -133,11 +126,12 @@ func newLiveTranscriptionSession(ctx context.Context, apiKey, clientSecretEndpoi
 	}
 	conn.SetReadLimit(1 << 20)
 
-	session := &liveTranscriptionSession{
-		conn:       conn,
-		events:     make(chan realtimeServerEvent, 16),
-		deltaReady: make(chan struct{}, 1),
-		readErr:    make(chan error, 1),
+	session := &openAILiveTranscriptionSession{
+		liveDeltaBuffer: newLiveDeltaBuffer(),
+		conn:            conn,
+		chunker:         pcmChunker{chunkSamples: openAILiveAudioChunkSamples},
+		events:          make(chan realtimeServerEvent, 16),
+		readErr:         make(chan error, 1),
 	}
 	go session.readEvents(ctx)
 	if err := session.waitForCreated(setupCtx); err != nil {
@@ -196,7 +190,7 @@ func createTranscriptionClientSecret(ctx context.Context, apiKey, endpoint strin
 	return secret.Value, nil
 }
 
-func (s *liveTranscriptionSession) waitForCreated(ctx context.Context) error {
+func (s *openAILiveTranscriptionSession) waitForCreated(ctx context.Context) error {
 	for {
 		event, err := s.nextEvent(ctx)
 		if err != nil {
@@ -214,7 +208,7 @@ func (s *liveTranscriptionSession) waitForCreated(ctx context.Context) error {
 	}
 }
 
-func (s *liveTranscriptionSession) readEvents(ctx context.Context) {
+func (s *openAILiveTranscriptionSession) readEvents(ctx context.Context) {
 	for {
 		var raw json.RawMessage
 		if err := wsjson.Read(ctx, s.conn, &raw); err != nil {
@@ -245,7 +239,7 @@ func (s *liveTranscriptionSession) readEvents(ctx context.Context) {
 	}
 }
 
-func (s *liveTranscriptionSession) Configure(ctx context.Context, transcriptionContext TranscriptionContext) error {
+func (s *openAILiveTranscriptionSession) Configure(ctx context.Context, transcriptionContext TranscriptionContext) error {
 	ctx, cancel := context.WithTimeout(ctx, liveSetupTimeout)
 	defer cancel()
 
@@ -254,9 +248,9 @@ func (s *liveTranscriptionSession) Configure(ctx context.Context, transcriptionC
 		Session: realtimeTranscriptionSession{
 			Type: "transcription",
 			Audio: realtimeTranscriptionAudio{Input: realtimeTranscriptionAudioInput{
-				Format: realtimePCMFormat{Type: "audio/pcm", Rate: liveSampleRate},
+				Format: realtimePCMFormat{Type: "audio/pcm", Rate: openAILiveSampleRate},
 				Transcription: realtimeTranscriptionSettings{
-					Model:     liveTranscriptionModel,
+					Model:     openAILiveTranscriptionModel,
 					Prompt:    transcriptionContext.Prompt,
 					Keywords:  transcriptionContext.Keywords,
 					Languages: transcriptionContext.Languages,
@@ -284,43 +278,17 @@ func (s *liveTranscriptionSession) Configure(ctx context.Context, transcriptionC
 	}
 }
 
-func (s *liveTranscriptionSession) queueDelta(text string) {
-	s.deltaMu.Lock()
-	s.deltaBuf.WriteString(text)
-	s.deltaMu.Unlock()
-	select {
-	case s.deltaReady <- struct{}{}:
-	default:
-	}
+func (s *openAILiveTranscriptionSession) AppendPCM(ctx context.Context, samples []int16) error {
+	return s.chunker.append(samples, func(chunk []int16) error {
+		return s.writeAudio(ctx, chunk)
+	})
 }
 
-// takeDeltas returns and clears the transcript text accumulated since the
-// last call.
-func (s *liveTranscriptionSession) takeDeltas() string {
-	s.deltaMu.Lock()
-	defer s.deltaMu.Unlock()
-	text := s.deltaBuf.String()
-	s.deltaBuf.Reset()
-	return text
-}
-
-func (s *liveTranscriptionSession) AppendPCM(ctx context.Context, samples []int16) error {
-	s.pending = append(s.pending, samples...)
-	for len(s.pending) >= liveAudioChunkSamples {
-		if err := s.writeAudio(ctx, s.pending[:liveAudioChunkSamples]); err != nil {
-			return err
-		}
-		s.pending = s.pending[liveAudioChunkSamples:]
-	}
-	return nil
-}
-
-func (s *liveTranscriptionSession) CommitAndWait(ctx context.Context) (string, error) {
-	if len(s.pending) > 0 {
-		if err := s.writeAudio(ctx, s.pending); err != nil {
-			return "", err
-		}
-		s.pending = nil
+func (s *openAILiveTranscriptionSession) CommitAndWait(ctx context.Context) (string, error) {
+	if err := s.chunker.flush(func(chunk []int16) error {
+		return s.writeAudio(ctx, chunk)
+	}); err != nil {
+		return "", err
 	}
 	if err := s.writeJSON(ctx, realtimeSimpleEvent{Type: "input_audio_buffer.commit"}); err != nil {
 		return "", err
@@ -354,14 +322,14 @@ func (s *liveTranscriptionSession) CommitAndWait(ctx context.Context) (string, e
 	}
 }
 
-func (s *liveTranscriptionSession) writeAudio(ctx context.Context, samples []int16) error {
+func (s *openAILiveTranscriptionSession) writeAudio(ctx context.Context, samples []int16) error {
 	return s.writeJSON(ctx, realtimeAudioAppend{
 		Type:  "input_audio_buffer.append",
 		Audio: base64.StdEncoding.EncodeToString(pcm16Bytes(samples)),
 	})
 }
 
-func (s *liveTranscriptionSession) writeJSON(ctx context.Context, value any) error {
+func (s *openAILiveTranscriptionSession) writeJSON(ctx context.Context, value any) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := wsjson.Write(ctx, s.conn, value); err != nil {
@@ -370,7 +338,7 @@ func (s *liveTranscriptionSession) writeJSON(ctx context.Context, value any) err
 	return nil
 }
 
-func (s *liveTranscriptionSession) nextEvent(ctx context.Context) (realtimeServerEvent, error) {
+func (s *openAILiveTranscriptionSession) nextEvent(ctx context.Context) (realtimeServerEvent, error) {
 	select {
 	case event := <-s.events:
 		return event, nil
@@ -394,7 +362,7 @@ func (s *liveTranscriptionSession) nextEvent(ctx context.Context) (realtimeServe
 	}
 }
 
-func (s *liveTranscriptionSession) Close() {
+func (s *openAILiveTranscriptionSession) Close() {
 	s.closeOnce.Do(func() {
 		_ = s.conn.Close(websocket.StatusNormalClosure, "transcription complete")
 	})

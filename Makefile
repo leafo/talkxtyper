@@ -4,15 +4,15 @@ PNG_FILES := icon_blue.png icon_red.png icon_green.png
 
 GO_FILES := $(PNG_FILES:.png=.go)
 
+build:
+	go build -o talkxtyper *.go
+
 # Run the Go program
 run:
 	go run *.go
 
 oneshot:
 	go run *.go -one-shot
-
-build:
-	go build -o talkxtyper *.go
 
 # Default target
 icons: $(GO_FILES)

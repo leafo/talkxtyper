@@ -9,10 +9,14 @@ import (
 )
 
 type TranscriptionMode string
+type TranscriptionProvider string
 
 const (
 	TranscriptionModeBuffered TranscriptionMode = "buffered"
 	TranscriptionModeLive     TranscriptionMode = "live"
+
+	TranscriptionProviderOpenAI TranscriptionProvider = "openai"
+	TranscriptionProviderGemini TranscriptionProvider = "gemini"
 )
 
 func normalizeTranscriptionMode(mode TranscriptionMode) TranscriptionMode {
@@ -22,19 +26,29 @@ func normalizeTranscriptionMode(mode TranscriptionMode) TranscriptionMode {
 	return TranscriptionModeBuffered
 }
 
+func normalizeTranscriptionProvider(provider TranscriptionProvider) TranscriptionProvider {
+	if provider == TranscriptionProviderGemini {
+		return TranscriptionProviderGemini
+	}
+	return TranscriptionProviderOpenAI
+}
+
 type Config struct {
-	OpenAIKey         string
-	ChatModel         string
-	TranscriptionMode TranscriptionMode
-	IncludeScreen     bool
-	IncludeNvim       bool
-	IncludeTmux       bool
-	ListenAddress     string
+	OpenAIKey             string
+	GeminiKey             string
+	ChatModel             string
+	TranscriptionProvider TranscriptionProvider
+	TranscriptionMode     TranscriptionMode
+	IncludeScreen         bool
+	IncludeNvim           bool
+	IncludeTmux           bool
+	ListenAddress         string
 }
 
 var config = Config{
-	ChatModel:         "gpt-5.6-luna",
-	TranscriptionMode: TranscriptionModeBuffered,
+	ChatModel:             "gpt-5.6-luna",
+	TranscriptionProvider: TranscriptionProviderOpenAI,
+	TranscriptionMode:     TranscriptionModeBuffered,
 	// ListenAddress: "localhost:9898",
 	// IncludeScreen: true,
 	// IncludeNvim: true,
@@ -68,6 +82,7 @@ func readConfig() error {
 		return fmt.Errorf("Error unmarshalling config file: %v", err)
 	}
 	config.TranscriptionMode = normalizeTranscriptionMode(config.TranscriptionMode)
+	config.TranscriptionProvider = normalizeTranscriptionProvider(config.TranscriptionProvider)
 
 	log.Printf("Configuration loaded: %s\n", configPath)
 

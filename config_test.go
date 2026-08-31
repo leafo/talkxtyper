@@ -19,3 +19,21 @@ func TestNormalizeTranscriptionMode(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeTranscriptionProvider(t *testing.T) {
+	tests := []struct {
+		input TranscriptionProvider
+		want  TranscriptionProvider
+	}{
+		{"", TranscriptionProviderOpenAI},
+		{"unknown", TranscriptionProviderOpenAI},
+		{TranscriptionProviderOpenAI, TranscriptionProviderOpenAI},
+		{TranscriptionProviderGemini, TranscriptionProviderGemini},
+	}
+
+	for _, test := range tests {
+		if got := normalizeTranscriptionProvider(test.input); got != test.want {
+			t.Errorf("normalizeTranscriptionProvider(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
