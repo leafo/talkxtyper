@@ -83,8 +83,9 @@ func TestGeminiLiveUsesOnlyFinalizedTranscriptions(t *testing.T) {
 		session:           fake,
 		chunker:           pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
 		finalized:         make(chan struct{}, 1),
+		activity:          make(chan struct{}, 1),
 		readErr:           make(chan error, 1),
-		finalizationGrace: 100 * time.Millisecond,
+		finalizationGrace: 300 * time.Millisecond,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -165,8 +166,9 @@ func newFakeGeminiLiveSessionPair(t *testing.T) (*fakeGeminiLiveSession, *gemini
 		session:           fake,
 		chunker:           pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
 		finalized:         make(chan struct{}, 1),
+		activity:          make(chan struct{}, 1),
 		readErr:           make(chan error, 1),
-		finalizationGrace: 100 * time.Millisecond,
+		finalizationGrace: 300 * time.Millisecond,
 	}
 	t.Cleanup(func() { _ = fake.Close() })
 	go session.readEvents()
@@ -304,5 +306,136 @@ func TestGeminiLiveUsesTranscriptFinalizedBeforeStop(t *testing.T) {
 	}
 	if result.text != "already final" {
 		t.Fatalf("transcript = %q, want %q", result.text, "already final")
+	}
+}
+
+// commitGeminiSession runs CommitAndWait in the background and consumes the
+// AudioStreamEnd the session sends on the way in.
+func commitGeminiSession(ctx context.Context, t *testing.T, fake *fakeGeminiLiveSession, session *geminiLiveTranscriptionSession) <-chan struct {
+	text string
+	err  error
+} {
+	t.Helper()
+	resultCh := make(chan struct {
+		text string
+		err  error
+	}, 1)
+	go func() {
+		text, err := session.CommitAndWait(ctx)
+		resultCh <- struct {
+			text string
+			err  error
+		}{text, err}
+	}()
+	if end := <-fake.sendCh; !end.AudioStreamEnd {
+		t.Errorf("final input = %+v, want AudioStreamEnd", end)
+	}
+	return resultCh
+}
+
+// A transcription message that carries no text (a bare end-of-transcription
+// marker for speech finalized before the user released the key) must not end
+// the commit, or the tail of the recording is dropped.
+func TestGeminiLiveIgnoresTextlessTranscription(t *testing.T) {
+	fake, session := newFakeGeminiLiveSessionPair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "before the pause"},
+	}}
+	select {
+	case <-session.deltaReadyCh():
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for transcription")
+	}
+
+	resultCh := commitGeminiSession(ctx, t, fake, session)
+
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{},
+	}}
+	select {
+	case result := <-resultCh:
+		t.Fatalf("commit returned on a text-less transcription: %q, %v", result.text, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "and the tail", Finished: true},
+	}}
+	result := <-resultCh
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if result.text != "before the pause and the tail" {
+		t.Fatalf("transcript = %q, want the tail included", result.text)
+	}
+}
+
+// A transcription split across several messages must be collected in full:
+// each piece restarts the grace instead of the first one ending the wait.
+func TestGeminiLiveCollectsMultiMessageTail(t *testing.T) {
+	fake, session := newFakeGeminiLiveSessionPair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "one"},
+	}}
+	select {
+	case <-session.deltaReadyCh():
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for transcription")
+	}
+
+	resultCh := commitGeminiSession(ctx, t, fake, session)
+
+	// Spaced closer together than the grace, but well past it in total.
+	for _, text := range []string{"two", "three", "four"} {
+		time.Sleep(session.finalizationGrace / 2)
+		select {
+		case result := <-resultCh:
+			t.Fatalf("commit returned mid-transcription: %q, %v", result.text, result.err)
+		default:
+		}
+		fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+			InputTranscription: &genai.Transcription{Text: text},
+		}}
+	}
+
+	result := <-resultCh
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if result.text != "one two three four" {
+		t.Fatalf("transcript = %q, want every message", result.text)
+	}
+}
+
+// Finished is authoritative: the commit returns on it without waiting out the
+// grace.
+func TestGeminiLiveReturnsImmediatelyOnFinished(t *testing.T) {
+	fake, session := newFakeGeminiLiveSessionPair(t)
+	session.finalizationGrace = 10 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resultCh := commitGeminiSession(ctx, t, fake, session)
+
+	start := time.Now()
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "all done", Finished: true},
+	}}
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.text != "all done" {
+			t.Fatalf("transcript = %q, want %q", result.text, "all done")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("commit did not return on Finished after %s", time.Since(start))
 	}
 }

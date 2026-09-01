@@ -28,8 +28,11 @@ type geminiLiveTranscriptionSession struct {
 
 	transcriptMu sync.Mutex
 	transcript   strings.Builder
-	finalized    chan struct{}
-	readErr      chan error
+	// finalized reports an authoritative end of transcription (Finished);
+	// activity reports that more finalized text is still streaming in.
+	finalized chan struct{}
+	activity  chan struct{}
+	readErr   chan error
 
 	// Tests shorten this; production sessions use geminiFinalizationGrace.
 	finalizationGrace time.Duration
@@ -69,8 +72,10 @@ func newGeminiLiveTranscriptionSession(ctx context.Context, transcriptionContext
 		}
 		session = connected.session
 	case <-setupCtx.Done():
-		// The SDK's WebSocket dial does not currently accept a context. Arrange
-		// cleanup if its own handshake timeout completes after ours.
+		// The SDK's WebSocket dial does not currently accept a context, and it
+		// waits for SetupComplete without a deadline. Arrange cleanup for
+		// whenever it does return; a server that accepts the socket and then
+		// stays silent leaks this goroutine until the process exits.
 		go func() {
 			if connected := <-connectCh; connected.session != nil {
 				_ = connected.session.Close()
@@ -84,6 +89,7 @@ func newGeminiLiveTranscriptionSession(ctx context.Context, transcriptionContext
 		session:         session,
 		chunker:         pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
 		finalized:       make(chan struct{}, 1),
+		activity:        make(chan struct{}, 1),
 		readErr:         make(chan error, 1),
 	}
 	go result.readEvents()
@@ -113,11 +119,18 @@ func (s *geminiLiveTranscriptionSession) readEvents() {
 				s.transcriptMu.Lock()
 				chunk = appendGeminiTranscriptSegment(&s.transcript, final.Text)
 				s.transcriptMu.Unlock()
+				// Text is committed, but a transcription may span several
+				// messages, so this is progress rather than completion.
+				signalOnce(s.activity)
 			}
-			// For Gemini 3.5 Transcribe Live, InputTranscription is itself the
-			// finalized, authoritative segment. It does not need Finished or
-			// TurnComplete, whose ordering is independent of transcription.
-			s.signalFinalized()
+			// Finished marks the authoritative end of the transcription. A
+			// message without it (including a text-less one) must not end a
+			// commit early, or the tail of the recording is dropped.
+			// TurnComplete is not usable here: it belongs to model-turn
+			// processing and is not ordered with input transcription.
+			if final.Finished {
+				signalOnce(s.finalized)
+			}
 		}
 		if chunk != "" {
 			s.queueDelta(chunk)
@@ -142,10 +155,20 @@ func appendGeminiTranscriptSegment(transcript *strings.Builder, text string) str
 	return chunk
 }
 
-func (s *geminiLiveTranscriptionSession) signalFinalized() {
+func signalOnce(ch chan struct{}) {
 	select {
-	case s.finalized <- struct{}{}:
+	case ch <- struct{}{}:
 	default:
+	}
+}
+
+func drain(ch chan struct{}) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
 	}
 }
 
@@ -157,51 +180,59 @@ func (s *geminiLiveTranscriptionSession) CommitAndWait(ctx context.Context) (str
 	if err := s.chunker.flush(s.writeAudio); err != nil {
 		return "", err
 	}
-	previousTranscript := s.transcriptText()
-	// Discard notifications for segments finalized at pauses earlier in this
-	// recording. AudioStreamEnd normally prompts a fresh finalized segment.
-	for {
-		select {
-		case <-s.finalized:
-			continue
-		default:
-			goto drained
-		}
-	}
+	// Discard notifications for text finalized at pauses earlier in this
+	// recording, so only what the server sends from here on ends the wait.
+	drain(s.finalized)
+	drain(s.activity)
 
-drained:
 	if err := s.session.SendRealtimeInput(genai.LiveRealtimeInput{AudioStreamEnd: true}); err != nil {
 		return "", fmt.Errorf("ending Gemini live audio stream: %w", err)
 	}
 
-	// If the server had already finalized all speech during a pause, it may have
-	// no new text to emit for AudioStreamEnd. Give a fresh segment a short chance
-	// to arrive, then accept the authoritative transcript already received.
-	var graceTimer *time.Timer
-	var graceCh <-chan time.Time
-	if previousTranscript != "" {
-		grace := s.finalizationGrace
-		if grace <= 0 {
-			grace = geminiFinalizationGrace
-		}
-		graceTimer = time.NewTimer(grace)
-		graceCh = graceTimer.C
-		defer graceTimer.Stop()
+	grace := s.finalizationGrace
+	if grace <= 0 {
+		grace = geminiFinalizationGrace
 	}
+	// If the server had already finalized all speech during a pause, it may have
+	// no new text to emit for AudioStreamEnd, and it does not always mark the
+	// last message Finished. The grace bounds that wait, but every further piece
+	// of text restarts it so a transcription split across messages is collected
+	// in full instead of being cut after the first one.
+	graceTimer := time.NewTimer(grace)
+	defer graceTimer.Stop()
+	stopGrace := func() {
+		if !graceTimer.Stop() {
+			select {
+			case <-graceTimer.C:
+			default:
+			}
+		}
+	}
+	// With nothing transcribed yet there is no partial result worth returning,
+	// so wait out the full timeout rather than the grace.
+	if s.transcriptText() == "" {
+		stopGrace()
+	}
+
 	timeoutTimer := time.NewTimer(geminiFinalizationTimeout)
 	defer timeoutTimer.Stop()
 
-	select {
-	case <-s.finalized:
-		return s.completedTranscript()
-	case <-graceCh:
-		return s.completedTranscript()
-	case err := <-s.readErr:
-		return s.transcriptText(), fmt.Errorf("reading Gemini live transcription: %w", err)
-	case <-timeoutTimer.C:
-		return s.transcriptText(), fmt.Errorf("timed out waiting for Gemini live finalization")
-	case <-ctx.Done():
-		return s.transcriptText(), ctx.Err()
+	for {
+		select {
+		case <-s.finalized:
+			return s.completedTranscript()
+		case <-s.activity:
+			stopGrace()
+			graceTimer.Reset(grace)
+		case <-graceTimer.C:
+			return s.completedTranscript()
+		case err := <-s.readErr:
+			return s.transcriptText(), fmt.Errorf("reading Gemini live transcription: %w", err)
+		case <-timeoutTimer.C:
+			return s.transcriptText(), fmt.Errorf("timed out waiting for Gemini live finalization")
+		case <-ctx.Done():
+			return s.transcriptText(), ctx.Err()
+		}
 	}
 }
 
