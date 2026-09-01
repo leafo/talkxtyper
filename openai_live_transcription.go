@@ -25,7 +25,7 @@ const (
 )
 
 type openAILiveTranscriptionSession struct {
-	*liveDeltaBuffer
+	*liveTextBuffer
 	conn      *websocket.Conn
 	writeMu   sync.Mutex
 	chunker   pcmChunker
@@ -127,11 +127,11 @@ func newOpenAILiveTranscriptionSession(ctx context.Context, apiKey, clientSecret
 	conn.SetReadLimit(1 << 20)
 
 	session := &openAILiveTranscriptionSession{
-		liveDeltaBuffer: newLiveDeltaBuffer(),
-		conn:            conn,
-		chunker:         pcmChunker{chunkSamples: openAILiveAudioChunkSamples},
-		events:          make(chan realtimeServerEvent, 16),
-		readErr:         make(chan error, 1),
+		liveTextBuffer: newLiveTextBuffer(),
+		conn:           conn,
+		chunker:        pcmChunker{chunkSamples: openAILiveAudioChunkSamples},
+		events:         make(chan realtimeServerEvent, 16),
+		readErr:        make(chan error, 1),
 	}
 	go session.readEvents(ctx)
 	if err := session.waitForCreated(setupCtx); err != nil {
@@ -226,7 +226,7 @@ func (s *openAILiveTranscriptionSession) readEvents(ctx context.Context) {
 		// CommitAndWait returns, every delta is already in the buffer.
 		if event.Type == "conversation.item.input_audio_transcription.delta" {
 			if event.Delta != "" {
-				s.queueDelta(event.Delta)
+				s.appendLiveText(event.Delta)
 			}
 			continue
 		}

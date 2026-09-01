@@ -1,47 +1,76 @@
 package main
 
 import (
-	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
-// liveDeltaBuffer accumulates transcript text for the typer.
+// liveTextBuffer holds the text the typer should currently have on screen.
 //
-// Delta text accumulates here instead of a channel so the socket reader never
-// blocks behind keyboard injection; a slow consumer just takes a larger
-// coalesced chunk on its next read.
-type liveDeltaBuffer struct {
+// Providers publish snapshots here instead of deltas so revisable text (such
+// as Gemini's interim hypotheses) can be corrected: the typer diffs the
+// snapshot against what it has typed and backspaces the changed tail. The
+// snapshot lives behind a mutex instead of a channel so the socket reader
+// never blocks behind keyboard injection; a slow consumer simply skips
+// intermediate revisions.
+type liveTextBuffer struct {
 	mu    sync.Mutex
-	buf   strings.Builder
+	text  string
 	ready chan struct{}
 }
 
-func newLiveDeltaBuffer() *liveDeltaBuffer {
-	return &liveDeltaBuffer{ready: make(chan struct{}, 1)}
+func newLiveTextBuffer() *liveTextBuffer {
+	return &liveTextBuffer{ready: make(chan struct{}, 1)}
 }
 
-func (d *liveDeltaBuffer) queueDelta(text string) {
+// setLiveText replaces the current snapshot.
+func (d *liveTextBuffer) setLiveText(text string) {
 	d.mu.Lock()
-	d.buf.WriteString(text)
+	d.text = text
 	d.mu.Unlock()
+	d.signalReady()
+}
+
+// appendLiveText extends the current snapshot with append-only text.
+func (d *liveTextBuffer) appendLiveText(text string) {
+	d.mu.Lock()
+	d.text += text
+	d.mu.Unlock()
+	d.signalReady()
+}
+
+func (d *liveTextBuffer) signalReady() {
 	select {
 	case d.ready <- struct{}{}:
 	default:
 	}
 }
 
-// takeDeltas returns and clears the transcript text accumulated since the
-// last call.
-func (d *liveDeltaBuffer) takeDeltas() string {
+// liveText returns the text the typer should currently show.
+func (d *liveTextBuffer) liveText() string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	text := d.buf.String()
-	d.buf.Reset()
-	return text
+	return d.text
 }
 
-func (d *liveDeltaBuffer) deltaReadyCh() <-chan struct{} {
+func (d *liveTextBuffer) liveTextReadyCh() <-chan struct{} {
 	return d.ready
+}
+
+// liveTypingPlan computes how to turn the typed text into target: erase
+// backspaces characters from the end of typed, then type suffix. The common
+// prefix is compared by rune so a multi-byte character is never split.
+func liveTypingPlan(typed, target string) (backspaces int, suffix string) {
+	prefix := 0
+	for prefix < len(typed) && prefix < len(target) {
+		typedRune, typedSize := utf8.DecodeRuneInString(typed[prefix:])
+		targetRune, targetSize := utf8.DecodeRuneInString(target[prefix:])
+		if typedRune != targetRune || typedSize != targetSize {
+			break
+		}
+		prefix += typedSize
+	}
+	return utf8.RuneCountInString(typed[prefix:]), target[prefix:]
 }
 
 // pcmChunker batches recorded samples into the fixed-size chunks the streaming

@@ -73,13 +73,13 @@ func (s *fakeGeminiLiveSession) Close() error {
 	return nil
 }
 
-func TestGeminiLiveUsesOnlyFinalizedTranscriptions(t *testing.T) {
+func TestGeminiLiveShowsInterimThenCommittedText(t *testing.T) {
 	fake := &fakeGeminiLiveSession{
 		receiveCh: make(chan *genai.LiveServerMessage, 4),
 		sendCh:    make(chan genai.LiveRealtimeInput, 4),
 	}
 	session := &geminiLiveTranscriptionSession{
-		liveDeltaBuffer:   newLiveDeltaBuffer(),
+		liveTextBuffer:    newLiveTextBuffer(),
 		session:           fake,
 		chunker:           pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
 		finalized:         make(chan struct{}, 1),
@@ -92,10 +92,18 @@ func TestGeminiLiveUsesOnlyFinalizedTranscriptions(t *testing.T) {
 	t.Cleanup(func() { _ = fake.Close() })
 	go session.readEvents()
 
-	// This hypothesis must never be exposed to keyboard injection.
+	// Interim hypotheses are shown live; the typer corrects them later.
 	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
 		InterimInputTranscription: &genai.Transcription{Text: "yellow"},
 	}}
+	select {
+	case <-session.liveTextReadyCh():
+	case <-ctx.Done():
+		t.Fatal("interim text was not published")
+	}
+	if got := session.liveText(); got != "yellow" {
+		t.Fatalf("liveText() after interim = %q, want %q", got, "yellow")
+	}
 
 	samples := []int16{0x1234, -2}
 	if err := session.AppendPCM(ctx, samples); err != nil {
@@ -134,8 +142,112 @@ func TestGeminiLiveUsesOnlyFinalizedTranscriptions(t *testing.T) {
 	if result.text != "hello world" {
 		t.Fatalf("transcript = %q, want %q", result.text, "hello world")
 	}
-	if got := session.takeDeltas(); got != "hello world" {
-		t.Fatalf("takeDeltas() = %q, want finalized text only", got)
+	// The committed text replaces the interim hypothesis entirely.
+	if got := session.liveText(); got != "hello world" {
+		t.Fatalf("liveText() after commit = %q, want %q", got, "hello world")
+	}
+}
+
+// When the committed text says what the interim hypothesis already said,
+// Gemini has nothing left to transcribe and the commit must not wait out the
+// grace period.
+func TestGeminiLiveReturnsEarlyWhenCommitMatchesInterim(t *testing.T) {
+	fake := &fakeGeminiLiveSession{
+		receiveCh: make(chan *genai.LiveServerMessage, 4),
+		sendCh:    make(chan genai.LiveRealtimeInput, 4),
+	}
+	session := &geminiLiveTranscriptionSession{
+		liveTextBuffer:    newLiveTextBuffer(),
+		session:           fake,
+		chunker:           pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
+		finalized:         make(chan struct{}, 1),
+		activity:          make(chan struct{}, 1),
+		readErr:           make(chan error, 1),
+		finalizationGrace: 2 * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	t.Cleanup(func() { _ = fake.Close() })
+	go session.readEvents()
+
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InterimInputTranscription: &genai.Transcription{Text: "hello world"},
+	}}
+	resultCh := make(chan string, 1)
+	go func() {
+		text, err := session.CommitAndWait(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+		resultCh <- text
+	}()
+	if end := <-fake.sendCh; !end.AudioStreamEnd {
+		t.Fatalf("input = %+v, want AudioStreamEnd", end)
+	}
+	start := time.Now()
+	fake.receiveCh <- &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "Hello, world."},
+	}}
+	select {
+	case text := <-resultCh:
+		if text != "Hello, world." {
+			t.Fatalf("transcript = %q, want %q", text, "Hello, world.")
+		}
+		if time.Since(start) > time.Second {
+			t.Fatalf("commit waited %s despite matching interim", time.Since(start))
+		}
+	case <-ctx.Done():
+		t.Fatal("commit did not return")
+	}
+}
+
+func TestTranscriptWordsEqual(t *testing.T) {
+	cases := []struct {
+		a, b  string
+		equal bool
+	}{
+		{"hello world", "Hello, world.", true},
+		{"hello  world", "hello world", true},
+		{"hello world", "hello", false},
+		{"hello", "hello world", false},
+		{"", "", true},
+	}
+	for _, c := range cases {
+		if got := transcriptWordsEqual(c.a, c.b); got != c.equal {
+			t.Errorf("transcriptWordsEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.equal)
+		}
+	}
+}
+
+func TestGeminiLiveTextCombinesCommittedAndInterim(t *testing.T) {
+	session := &geminiLiveTranscriptionSession{liveTextBuffer: newLiveTextBuffer()}
+	session.transcript.WriteString("first phrase.")
+	session.interim = "second"
+	session.publishLiveText()
+	if got := session.liveText(); got != "first phrase. second" {
+		t.Fatalf("liveText() = %q, want %q", got, "first phrase. second")
+	}
+}
+
+func TestLiveTypingPlan(t *testing.T) {
+	cases := []struct {
+		typed, target string
+		backspaces    int
+		suffix        string
+	}{
+		{"", "hello", 0, "hello"},
+		{"hello", "hello world", 0, " world"},
+		{"hello yellow", "hello world", 6, "world"},
+		{"hello", "hello", 0, ""},
+		{"hello", "", 5, ""},
+		{"héllo wörld", "héllo wörds", 2, "ds"},
+		{"héllo", "hallo", 4, "allo"},
+	}
+	for _, c := range cases {
+		backspaces, suffix := liveTypingPlan(c.typed, c.target)
+		if backspaces != c.backspaces || suffix != c.suffix {
+			t.Errorf("liveTypingPlan(%q, %q) = (%d, %q), want (%d, %q)", c.typed, c.target, backspaces, suffix, c.backspaces, c.suffix)
+		}
 	}
 }
 
@@ -162,7 +274,7 @@ func newFakeGeminiLiveSessionPair(t *testing.T) (*fakeGeminiLiveSession, *gemini
 		sendCh:    make(chan genai.LiveRealtimeInput, 4),
 	}
 	session := &geminiLiveTranscriptionSession{
-		liveDeltaBuffer:   newLiveDeltaBuffer(),
+		liveTextBuffer:    newLiveTextBuffer(),
 		session:           fake,
 		chunker:           pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
 		finalized:         make(chan struct{}, 1),
@@ -186,7 +298,7 @@ func TestGeminiLiveCommitWaitsForCurrentTurn(t *testing.T) {
 		InputTranscription: &genai.Transcription{Text: "first"},
 	}}
 	select {
-	case <-session.deltaReadyCh():
+	case <-session.liveTextReadyCh():
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcription")
 	}
@@ -245,7 +357,7 @@ func TestGeminiLiveReturnsPartialTranscriptWithSocketError(t *testing.T) {
 		InputTranscription: &genai.Transcription{Text: "hello world"},
 	}}
 	select {
-	case <-session.deltaReadyCh():
+	case <-session.liveTextReadyCh():
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcription")
 	}
@@ -280,7 +392,7 @@ func TestGeminiLiveUsesTranscriptFinalizedBeforeStop(t *testing.T) {
 		InputTranscription: &genai.Transcription{Text: "already final"},
 	}}
 	select {
-	case <-session.deltaReadyCh():
+	case <-session.liveTextReadyCh():
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcription")
 	}
@@ -345,7 +457,7 @@ func TestGeminiLiveIgnoresTextlessTranscription(t *testing.T) {
 		InputTranscription: &genai.Transcription{Text: "before the pause"},
 	}}
 	select {
-	case <-session.deltaReadyCh():
+	case <-session.liveTextReadyCh():
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcription")
 	}
@@ -384,7 +496,7 @@ func TestGeminiLiveCollectsMultiMessageTail(t *testing.T) {
 		InputTranscription: &genai.Transcription{Text: "one"},
 	}}
 	select {
-	case <-session.deltaReadyCh():
+	case <-session.liveTextReadyCh():
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for transcription")
 	}

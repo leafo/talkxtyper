@@ -196,8 +196,8 @@ func TestLiveTranscriptionSession(t *testing.T) {
 	}
 	// The delta preceded the completed event on the socket, so it must
 	// already be buffered by the time CommitAndWait returns.
-	if got := session.takeDeltas(); got != "hello" {
-		t.Fatalf("takeDeltas() = %q, want %q", got, "hello")
+	if got := session.liveText(); got != "hello" {
+		t.Fatalf("liveText() = %q, want %q", got, "hello")
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatal(err)

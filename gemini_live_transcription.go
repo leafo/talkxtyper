@@ -21,13 +21,22 @@ const (
 )
 
 type geminiLiveTranscriptionSession struct {
-	*liveDeltaBuffer
+	*liveTextBuffer
 	session   geminiLiveSessionAPI
 	chunker   pcmChunker
 	closeOnce sync.Once
 
 	transcriptMu sync.Mutex
 	transcript   strings.Builder
+	// interim is Gemini's current hypothesis for the segment still being
+	// spoken. It is shown to the user and replaced by the committed text when
+	// the segment finalizes.
+	interim string
+	// lastCommitMatchedInterim records whether the most recent committed
+	// segment said the same thing as the interim hypothesis it replaced. When
+	// it did, Gemini has caught up with everything it heard and a commit need
+	// not wait out the finalization grace.
+	lastCommitMatchedInterim bool
 	// finalized reports an authoritative end of transcription (Finished);
 	// activity reports that more finalized text is still streaming in.
 	finalized chan struct{}
@@ -85,12 +94,12 @@ func newGeminiLiveTranscriptionSession(ctx context.Context, transcriptionContext
 	}
 
 	result := &geminiLiveTranscriptionSession{
-		liveDeltaBuffer: newLiveDeltaBuffer(),
-		session:         session,
-		chunker:         pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
-		finalized:       make(chan struct{}, 1),
-		activity:        make(chan struct{}, 1),
-		readErr:         make(chan error, 1),
+		liveTextBuffer: newLiveTextBuffer(),
+		session:        session,
+		chunker:        pcmChunker{chunkSamples: geminiLiveAudioChunkSamples},
+		finalized:      make(chan struct{}, 1),
+		activity:       make(chan struct{}, 1),
+		readErr:        make(chan error, 1),
 	}
 	go result.readEvents()
 	return result, nil
@@ -111,14 +120,23 @@ func (s *geminiLiveTranscriptionSession) readEvents() {
 			continue
 		}
 
-		// InterimInputTranscription is deliberately ignored: Gemini documents it
-		// as a revisable hypothesis, which is unsafe to inject into arbitrary apps.
-		chunk := ""
+		// Interim text is a revisable hypothesis. It is published so the typer
+		// can show speech as it happens; the typer backspaces whatever a later
+		// revision or the committed text changes.
+		if interim := content.InterimInputTranscription; interim != nil && interim.Text != "" {
+			s.transcriptMu.Lock()
+			s.interim = interim.Text
+			s.transcriptMu.Unlock()
+			s.publishLiveText()
+		}
 		if final := content.InputTranscription; final != nil {
 			if final.Text != "" {
 				s.transcriptMu.Lock()
-				chunk = appendGeminiTranscriptSegment(&s.transcript, final.Text)
+				appendGeminiTranscriptSegment(&s.transcript, final.Text)
+				s.lastCommitMatchedInterim = s.interim != "" && transcriptWordsEqual(final.Text, s.interim)
+				s.interim = ""
 				s.transcriptMu.Unlock()
+				s.publishLiveText()
 				// Text is committed, but a transcription may span several
 				// messages, so this is progress rather than completion.
 				signalOnce(s.activity)
@@ -132,10 +150,37 @@ func (s *geminiLiveTranscriptionSession) readEvents() {
 				signalOnce(s.finalized)
 			}
 		}
-		if chunk != "" {
-			s.queueDelta(chunk)
-		}
 	}
+}
+
+// publishLiveText snapshots the committed transcript followed by the current
+// interim hypothesis for the typer.
+func (s *geminiLiveTranscriptionSession) publishLiveText() {
+	s.transcriptMu.Lock()
+	var live strings.Builder
+	live.WriteString(s.transcript.String())
+	if s.interim != "" {
+		appendGeminiTranscriptSegment(&live, s.interim)
+	}
+	s.transcriptMu.Unlock()
+	s.setLiveText(live.String())
+}
+
+// transcriptWordsEqual reports whether two transcripts contain the same words,
+// ignoring case, punctuation and spacing, which is how a committed segment
+// usually differs from the interim hypothesis that preceded it.
+func transcriptWordsEqual(a, b string) bool {
+	return transcriptWords(a) == transcriptWords(b)
+}
+
+func transcriptWords(text string) string {
+	letters := strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return ' '
+	}, text)
+	return strings.Join(strings.Fields(letters), " ")
 }
 
 func appendGeminiTranscriptSegment(transcript *strings.Builder, text string) string {
@@ -222,6 +267,9 @@ func (s *geminiLiveTranscriptionSession) CommitAndWait(ctx context.Context) (str
 		case <-s.finalized:
 			return s.completedTranscript()
 		case <-s.activity:
+			if s.commitMatchedInterim() {
+				return s.completedTranscript()
+			}
 			stopGrace()
 			graceTimer.Reset(grace)
 		case <-graceTimer.C:
@@ -240,6 +288,12 @@ func (s *geminiLiveTranscriptionSession) transcriptText() string {
 	s.transcriptMu.Lock()
 	defer s.transcriptMu.Unlock()
 	return s.transcript.String()
+}
+
+func (s *geminiLiveTranscriptionSession) commitMatchedInterim() bool {
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
+	return s.lastCommitMatchedInterim
 }
 
 func (s *geminiLiveTranscriptionSession) completedTranscript() (string, error) {

@@ -57,15 +57,16 @@ The systray's **Transcription** submenu switches between four profiles:
   Transcribe** record the complete utterance and upload it after you stop.
 - **Live — OpenAI gpt-live-transcribe** streams 24 kHz PCM and types
   incremental transcript deltas.
-- **Live — Gemini 3.5 Transcribe** streams 16 kHz PCM and types finalized
-  phrases as they arrive. Gemini's speculative interim hypotheses are not typed
-  because the service may revise them.
+- **Live — Gemini 3.5 Transcribe** streams 16 kHz PCM and types Gemini's
+  interim hypothesis as you speak. When Gemini revises or finalizes a phrase,
+  the changed tail is backspaced and retyped, so the text on screen can
+  briefly change while you talk.
 
 The selected provider and mode are saved in the configuration file. Keyword and
 language hints and MP3 history are used with every profile. OpenAI also receives
 the free-form context prompt; Gemini receives the extracted terms as custom
 vocabulary. The optional repair pass only runs in buffered mode: live mode types
-text as you speak, so it cannot be revised afterwards.
+text as you speak and only corrects it with the provider's own final transcript.
 
 ## Configuration
 

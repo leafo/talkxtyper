@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -207,13 +206,14 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 		}
 	}()
 
-	// Deltas are typed the moment they arrive; there is no repair pass since
-	// typed text cannot be revised. An abort must stop typing immediately and
-	// discard anything still buffered.
+	// The typer keeps the screen in sync with the provider's live text
+	// snapshot: new text is typed as it arrives, and when a snapshot revises
+	// text already typed (Gemini's interim hypotheses), the changed tail is
+	// backspaced and retyped. An abort must stop typing immediately.
 	stopCh := make(chan bool)
 	typedCh := make(chan string, 1)
 	go func() {
-		var typed strings.Builder
+		typed := ""
 		var typerSession liveTranscriptionSessionAPI
 		select {
 		case typerSession = <-typerSessionCh:
@@ -226,24 +226,21 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 			typedCh <- ""
 			return
 		}
-		typePending := func() {
+		syncTyped := func() {
 			if t.ctx.Err() != nil {
 				return
 			}
-			if chunk := typerSession.takeDeltas(); chunk != "" {
-				typeString(chunk)
-				typed.WriteString(chunk)
-			}
+			typed = syncLiveTyping(typed, typerSession.liveText())
 		}
 		for {
 			select {
-			case <-typerSession.deltaReadyCh():
-				typePending()
+			case <-typerSession.liveTextReadyCh():
+				syncTyped()
 			case drain := <-stopCh:
 				if drain {
-					typePending()
+					syncTyped()
 				}
-				typedCh <- typed.String()
+				typedCh <- typed
 				return
 			}
 		}
@@ -311,13 +308,12 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 		return fmt.Errorf("finalizing live transcription: %w", err)
 	}
 
+	// The committed transcript is authoritative: correct any interim text
+	// still on screen and type whatever arrived after the typer's last sync.
 	typed := stopTyper(true)
-	if remainder, ok := strings.CutPrefix(transcript, typed); ok {
-		if remainder != "" {
-			typeString(remainder)
-		}
-	} else {
-		log.Printf("Live transcript diverged from typed deltas, leaving typed text as-is.\ntyped: %q\nfinal: %q", typed, transcript)
+	if typed != transcript {
+		log.Printf("Reconciling typed live text with final transcript.\ntyped: %q\nfinal: %q", typed, transcript)
+		syncLiveTyping(typed, transcript)
 	}
 
 	result := NewTranscriptionResult()
@@ -413,4 +409,17 @@ func (t *TranscribeTask) complete(result *TranscriptionResult) {
 	}
 	t.SetResult(result)
 	taskManager.AppendToHistory(result)
+}
+
+// syncLiveTyping edits the on-screen text from typed to target with
+// backspaces and typing, returning the text now on screen.
+func syncLiveTyping(typed, target string) string {
+	backspaces, suffix := liveTypingPlan(typed, target)
+	if backspaces > 0 {
+		typeBackspaces(backspaces)
+	}
+	if suffix != "" {
+		typeString(suffix)
+	}
+	return target
 }

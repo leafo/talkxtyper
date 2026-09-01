@@ -8,8 +8,8 @@ import (
 type liveTranscriptionSessionAPI interface {
 	AppendPCM(context.Context, []int16) error
 	CommitAndWait(context.Context) (string, error)
-	takeDeltas() string
-	deltaReadyCh() <-chan struct{}
+	liveText() string
+	liveTextReadyCh() <-chan struct{}
 	Close()
 }
 

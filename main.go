@@ -223,7 +223,7 @@ func onReady() {
 	mOpenAIBuffered := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — OpenAI gpt-transcribe", "Record first, then upload the completed audio file", transcriptionProfileSelected(TranscriptionProviderOpenAI, TranscriptionModeBuffered))
 	mOpenAILive := mTranscriptionMode.AddSubMenuItemCheckbox("Live — OpenAI gpt-live-transcribe", "Type the transcript as it is finalized; no repair pass", transcriptionProfileSelected(TranscriptionProviderOpenAI, TranscriptionModeLive))
 	mGeminiBuffered := mTranscriptionMode.AddSubMenuItemCheckbox("Buffered — Gemini 3.5 Transcribe", "Record first, then upload the completed audio file", transcriptionProfileSelected(TranscriptionProviderGemini, TranscriptionModeBuffered))
-	mGeminiLive := mTranscriptionMode.AddSubMenuItemCheckbox("Live — Gemini 3.5 Transcribe", "Type finalized phrases while you speak; no repair pass", transcriptionProfileSelected(TranscriptionProviderGemini, TranscriptionModeLive))
+	mGeminiLive := mTranscriptionMode.AddSubMenuItemCheckbox("Live — Gemini 3.5 Transcribe", "Type text as you speak, correcting it as Gemini finalizes; no repair pass", transcriptionProfileSelected(TranscriptionProviderGemini, TranscriptionModeLive))
 	transcriptionItems := []*systray.MenuItem{mOpenAIBuffered, mOpenAILive, mGeminiBuffered, mGeminiLive}
 	setTranscriptionProfile := func(provider TranscriptionProvider, mode TranscriptionMode) {
 		config.TranscriptionProvider = normalizeTranscriptionProvider(provider)
@@ -395,9 +395,26 @@ func transcriptionProfileLabel(provider TranscriptionProvider, mode Transcriptio
 	return providerLabel + " / " + transcriptionModeLabel(mode)
 }
 
+// typeCharDelayMillis is the extra pause robotgo adds after each typed
+// character. robotgo's X11 backend already holds every key down for 5 ms, so
+// this is set to zero for the fastest typing that still keeps events in order.
+const typeCharDelayMillis = 0
+
 func typeString(input string) error {
-	robotgo.TypeStr(input, 0, 2)
+	robotgo.TypeStr(input, 0, typeCharDelayMillis)
 	return nil
+}
+
+// typeBackspaces erases count characters. robotgo pauses KeySleep (10 ms by
+// default) after every tap, which makes live corrections visibly lag, so the
+// pause is shortened for the duration of the run.
+func typeBackspaces(count int) {
+	previousKeySleep := robotgo.KeySleep
+	robotgo.KeySleep = 1
+	defer func() { robotgo.KeySleep = previousKeySleep }()
+	for i := 0; i < count; i++ {
+		_ = robotgo.KeyTap("backspace")
+	}
 }
 
 func openHTTPInterface(addr string) error {
