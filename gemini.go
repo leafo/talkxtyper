@@ -104,11 +104,12 @@ func transcribeGeminiAudio(ctx context.Context, mp3FilePath string, transcriptio
 	result.TranscriptionModel = geminiTranscriptionModel
 	result.TranscriptionElapsed = transcribeElapsed
 	result.TranscriptionKeywords = transcriptionContext.Keywords
+	result.TranscriptionLanguages = transcriptionContext.Languages
+	result.ContextPrompt = transcriptionContext.Prompt
 
 	// The repair model remains independent from the transcription provider. This
 	// preserves the existing context-aware correction behavior for buffered mode.
 	if transcriptionContext.Prompt != "" {
-		result.RepairPrompt = transcriptionContext.Prompt
 		result.RepairModel = config.ChatModel
 		fixedText, repairElapsed, err := fixTranscription(ctx, text, transcriptionContext.Prompt)
 		if err != nil {

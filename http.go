@@ -249,12 +249,15 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 					<th>Transcription Mode</th>
 					<th>Transcription Model</th>
 					<th>Transcription Time</th>
+					<th>Live Finalization</th>
 					<th>Original</th>
+					<th>Live Typed</th>
 					<th>Modified</th>
+					<th>Languages</th>
 					<th>Transcription Keywords</th>
 					<th>Repair Model</th>
 					<th>Repair Time</th>
-					<th>Repair Prompt</th>
+					<th>Context Prompt</th>
 					<th>MP3 Recording</th>
 				</tr>
 				{{range .History}}
@@ -264,13 +267,16 @@ var historyPageTemplate = template.Must(template.New("history").Parse(`
 						<td>{{.TranscriptionMode}}</td>
 						<td>{{.TranscriptionModel}}</td>
 						<td>{{if .TranscriptionElapsed}}{{.TranscriptionElapsed}}{{end}}</td>
+						<td>{{.LiveFinalization}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Original}}</pre></td>
+						<td>{{if eq .TranscriptionMode "live"}}<pre style="white-space: pre-wrap;">{{.LiveTyped}}</pre>{{if .LiveCorrectedChars}}<p>{{.LiveCorrectedChars}} chars corrected</p>{{else}}<p>no correction</p>{{end}}{{end}}</td>
 						<td><pre style="white-space: pre-wrap;">{{.Modified}}</pre></td>
+						<td>{{range .TranscriptionLanguages}}{{.}} {{end}}</td>
 						<td><pre style="white-space: pre-wrap;">{{range .TranscriptionKeywords}}{{.}}
 {{end}}</pre></td>
 						<td>{{.RepairModel}}</td>
 						<td>{{if .RepairElapsed}}{{.RepairElapsed}}{{end}}</td>
-						<td><pre style="max-height: 200px; overflow-y: auto;">{{.RepairPrompt}}</pre></td>
+						<td><pre style="max-height: 200px; overflow-y: auto; white-space: pre-wrap;">{{.ContextPrompt}}</pre></td>
 						<td>
 							{{if .Mp3Recording}}
 								<audio controls preload="none">

@@ -80,9 +80,10 @@ func transcribeOpenAIAudio(ctx context.Context, mp3FilePath string, transcriptio
 	result.TranscriptionModel = "gpt-transcribe"
 	result.TranscriptionElapsed = transcribeElapsed
 	result.TranscriptionKeywords = transcriptionContext.Keywords
+	result.TranscriptionLanguages = transcriptionContext.Languages
+	result.ContextPrompt = transcriptionContext.Prompt
 
 	if transcriptionContext.Prompt != "" {
-		result.RepairPrompt = transcriptionContext.Prompt
 		result.RepairModel = config.ChatModel
 		fixedText, repairElapsed, err := fixTranscription(ctx, resp.Text, transcriptionContext.Prompt)
 		if err != nil {

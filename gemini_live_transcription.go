@@ -37,6 +37,8 @@ type geminiLiveTranscriptionSession struct {
 	// it did, Gemini has caught up with everything it heard and a commit need
 	// not wait out the finalization grace.
 	lastCommitMatchedInterim bool
+	// finalization records how the last CommitAndWait ended.
+	finalization string
 	// finalized reports an authoritative end of transcription (Finished);
 	// activity reports that more finalized text is still streaming in.
 	finalized chan struct{}
@@ -265,20 +267,26 @@ func (s *geminiLiveTranscriptionSession) CommitAndWait(ctx context.Context) (str
 	for {
 		select {
 		case <-s.finalized:
+			s.setFinalization("finished flag")
 			return s.completedTranscript()
 		case <-s.activity:
 			if s.commitMatchedInterim() {
+				s.setFinalization("commit matched interim")
 				return s.completedTranscript()
 			}
 			stopGrace()
 			graceTimer.Reset(grace)
 		case <-graceTimer.C:
+			s.setFinalization(fmt.Sprintf("%s grace after last commit", grace))
 			return s.completedTranscript()
 		case err := <-s.readErr:
+			s.setFinalization("socket error")
 			return s.transcriptText(), fmt.Errorf("reading Gemini live transcription: %w", err)
 		case <-timeoutTimer.C:
+			s.setFinalization("timed out")
 			return s.transcriptText(), fmt.Errorf("timed out waiting for Gemini live finalization")
 		case <-ctx.Done():
+			s.setFinalization("cancelled")
 			return s.transcriptText(), ctx.Err()
 		}
 	}
@@ -288,6 +296,18 @@ func (s *geminiLiveTranscriptionSession) transcriptText() string {
 	s.transcriptMu.Lock()
 	defer s.transcriptMu.Unlock()
 	return s.transcript.String()
+}
+
+func (s *geminiLiveTranscriptionSession) setFinalization(reason string) {
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
+	s.finalization = reason
+}
+
+func (s *geminiLiveTranscriptionSession) finalizationReason() string {
+	s.transcriptMu.Lock()
+	defer s.transcriptMu.Unlock()
+	return s.finalization
 }
 
 func (s *geminiLiveTranscriptionSession) commitMatchedInterim() bool {

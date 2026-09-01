@@ -22,10 +22,22 @@ type TranscriptionResult struct {
 	TranscriptionModel    string
 	TranscriptionElapsed  time.Duration
 	TranscriptionKeywords []string
-	RepairPrompt          string
-	RepairModel           string
-	RepairElapsed         time.Duration
-	Mp3Recording          []byte `json:"-"`
+	// TranscriptionLanguages are the language hints sent to the provider.
+	TranscriptionLanguages []string
+	// ContextPrompt is the screen/editor context collected for this recording.
+	// OpenAI receives it as the transcription prompt; the keywords above are
+	// extracted from it; the buffered repair pass uses it as instructions.
+	ContextPrompt string
+	RepairModel   string
+	RepairElapsed time.Duration
+	// LiveTyped is the text on screen when recording stopped in live mode,
+	// before the committed transcript was reconciled against it.
+	LiveTyped string
+	// LiveCorrectedChars counts characters backspaced by the final reconcile.
+	LiveCorrectedChars int
+	// LiveFinalization describes how the provider's commit wait ended.
+	LiveFinalization string
+	Mp3Recording     []byte `json:"-"`
 }
 
 func NewTranscriptionResult() *TranscriptionResult {
@@ -303,7 +315,9 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 
 	finalizeCtx, cancel := context.WithTimeout(t.ctx, 20*time.Second)
 	defer cancel()
+	finalizeStart := time.Now()
 	transcript, err := session.CommitAndWait(finalizeCtx)
+	finalizeElapsed := time.Since(finalizeStart)
 	if err != nil {
 		return fmt.Errorf("finalizing live transcription: %w", err)
 	}
@@ -311,6 +325,7 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	// The committed transcript is authoritative: correct any interim text
 	// still on screen and type whatever arrived after the typer's last sync.
 	typed := stopTyper(true)
+	correctedChars, _ := liveTypingPlan(typed, transcript)
 	if typed != transcript {
 		log.Printf("Reconciling typed live text with final transcript.\ntyped: %q\nfinal: %q", typed, transcript)
 		syncLiveTyping(typed, transcript)
@@ -321,7 +336,15 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	result.TranscriptionProvider = t.provider
 	result.TranscriptionMode = TranscriptionModeLive
 	result.TranscriptionModel = transcriptionModel
+	result.TranscriptionElapsed = finalizeElapsed
 	result.TranscriptionKeywords = transcriptionContext.Keywords
+	result.TranscriptionLanguages = transcriptionContext.Languages
+	result.ContextPrompt = transcriptionContext.Prompt
+	result.LiveTyped = typed
+	result.LiveCorrectedChars = correctedChars
+	if reporter, ok := session.(liveFinalizationReporter); ok {
+		result.LiveFinalization = reporter.finalizationReason()
+	}
 	mp3Path, err := writeAudioRecordingToMP3(recording)
 	if err != nil {
 		log.Printf("Error writing live MP3 history: %v", err)

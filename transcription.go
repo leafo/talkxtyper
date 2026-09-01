@@ -13,6 +13,12 @@ type liveTranscriptionSessionAPI interface {
 	Close()
 }
 
+// liveFinalizationReporter is implemented by live sessions that can explain
+// how their last CommitAndWait ended, for the history view.
+type liveFinalizationReporter interface {
+	finalizationReason() string
+}
+
 func transcribeAudio(ctx context.Context, provider TranscriptionProvider, mp3FilePath string, transcriptionContext TranscriptionContext) (*TranscriptionResult, error) {
 	switch normalizeTranscriptionProvider(provider) {
 	case TranscriptionProviderGemini:

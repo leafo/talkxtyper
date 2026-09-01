@@ -322,6 +322,10 @@ func (s *openAILiveTranscriptionSession) CommitAndWait(ctx context.Context) (str
 	}
 }
 
+func (s *openAILiveTranscriptionSession) finalizationReason() string {
+	return "transcription completed event"
+}
+
 func (s *openAILiveTranscriptionSession) writeAudio(ctx context.Context, samples []int16) error {
 	return s.writeJSON(ctx, realtimeAudioAppend{
 		Type:  "input_audio_buffer.append",
