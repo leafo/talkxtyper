@@ -20,12 +20,19 @@ type TranscriptionContext struct {
 func NewTranscriptionContext(prompt string) TranscriptionContext {
 	return TranscriptionContext{
 		Prompt:    prompt,
-		Keywords:  extractTranscriptionKeywords(prompt),
+		Keywords:  buildTranscriptionKeywords(config.Keywords, prompt),
 		Languages: []string{"en"},
 	}
 }
 
 func extractTranscriptionKeywords(prompt string) []string {
+	return buildTranscriptionKeywords(nil, prompt)
+}
+
+// buildTranscriptionKeywords combines the configured seed keywords with terms
+// extracted from the context prompt. Seeds come first so they survive the
+// keyword cap; duplicates are dropped case-insensitively.
+func buildTranscriptionKeywords(seed []string, prompt string) []string {
 	keywords := make([]string, 0, maxTranscriptionKeywords)
 	seen := make(map[string]struct{}, maxTranscriptionKeywords)
 
@@ -54,6 +61,10 @@ func extractTranscriptionKeywords(prompt string) []string {
 		}
 		seen[key] = struct{}{}
 		keywords = append(keywords, keyword)
+	}
+
+	for _, keyword := range seed {
+		add(keyword)
 	}
 
 	// Screenshot analysis emits an explicit list after a "Keywords:" heading.
@@ -139,4 +150,24 @@ func isTechnicalKeyword(token string) bool {
 		return true
 	}
 	return (hasUpper && !hasLower) || (upperCount >= 2 && hasLower)
+}
+
+// parseKeywordList splits user-entered text into keywords, one per line or
+// comma-separated, dropping blanks and duplicates.
+func parseKeywordList(text string) []string {
+	keywords := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, field := range strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == ',' }) {
+		keyword := sanitizeTranscriptionKeyword(field)
+		if keyword == "" {
+			continue
+		}
+		key := strings.ToLower(keyword)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keywords = append(keywords, keyword)
+	}
+	return keywords
 }

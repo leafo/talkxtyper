@@ -247,6 +247,8 @@ func onReady() {
 		}
 	}
 
+	mGeminiSmartMode := systray.AddMenuItemCheckbox("Gemini smart mode", "Gemini removes filler words, false starts and repetitions and lightly formats the text. Verbatim when off.", config.GeminiSmartMode)
+
 	mIncludeScreen := systray.AddMenuItemCheckbox("1. Include screen", "Highest priority. Sends a screenshot description; skips nvim/tmux when enabled.", config.IncludeScreen)
 	mIncludeNvim := systray.AddMenuItemCheckbox("2. Include nvim", "Tried before tmux. Falls through to tmux if no active nvim is found.", config.IncludeNvim)
 	mIncludeTmux := systray.AddMenuItemCheckbox("3. Include tmux", "Lowest priority. Used only if screen is off and nvim is off or unavailable.", config.IncludeTmux)
@@ -322,6 +324,19 @@ func onReady() {
 				setTranscriptionProfile(TranscriptionProviderGemini, TranscriptionModeBuffered)
 			case <-mGeminiLive.ClickedCh:
 				setTranscriptionProfile(TranscriptionProviderGemini, TranscriptionModeLive)
+
+			case <-mGeminiSmartMode.ClickedCh:
+				if mGeminiSmartMode.Checked() {
+					mGeminiSmartMode.Uncheck()
+				} else {
+					mGeminiSmartMode.Check()
+				}
+
+				config.GeminiSmartMode = mGeminiSmartMode.Checked()
+
+				if err := writeConfig(); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing config: %v\n", err)
+				}
 
 			case <-mIncludeScreen.ClickedCh:
 				if mIncludeScreen.Checked() {

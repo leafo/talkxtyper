@@ -83,6 +83,14 @@ configuration directory. The file is named `talkxtyper-config.json`.
 - `IncludeScreen`: A boolean value indicating whether to analyze the screen to augment the transcription. The config file will be updated automatically if you change this value in the program.
 - `IncludeNvim`: A boolean value indicating whether to analyze the screen to augment the transcription.
 - `IncludeTmux`: A boolean value indicating whether to collect context from the active tmux pane.
+- `GeminiSmartMode`: When `true`, Gemini transcription removes filler words,
+  false starts and repetitions and applies light formatting instead of
+  transcribing verbatim. Applies to both Gemini profiles. Toggle it from the
+  tray menu.
+- `Keywords`: A list of terms to always send as transcription hints, such as
+  names, identifiers, and jargon you say often. They are sent ahead of any
+  keywords extracted from the collected context. The web interface has a
+  `/keywords` page for editing this list.
 
 Screen description and the buffered context-repair pass still use OpenAI, even
 when Gemini is selected for transcription. An OpenAI key is therefore also

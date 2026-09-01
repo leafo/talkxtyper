@@ -49,6 +49,27 @@ func TestGeminiTranscriptionConfig(t *testing.T) {
 	}
 }
 
+func TestGeminiSmartMode(t *testing.T) {
+	previous := config.GeminiSmartMode
+	t.Cleanup(func() { config.GeminiSmartMode = previous })
+
+	config.GeminiSmartMode = true
+	if got := geminiAudioTranscriptionConfig(TranscriptionContext{}).Mode; got != genai.AudioTranscriptionConfigModeSmart {
+		t.Fatalf("Mode = %q, want SMART", got)
+	}
+	if got := geminiModelLabel("m"); got != "m (smart)" {
+		t.Fatalf("geminiModelLabel() = %q, want %q", got, "m (smart)")
+	}
+
+	config.GeminiSmartMode = false
+	if got := geminiAudioTranscriptionConfig(TranscriptionContext{}).Mode; got != genai.AudioTranscriptionConfigModeVerbatim {
+		t.Fatalf("Mode = %q, want VERBATIM", got)
+	}
+	if got := geminiModelLabel("m"); got != "m" {
+		t.Fatalf("geminiModelLabel() = %q, want %q", got, "m")
+	}
+}
+
 type fakeGeminiLiveSession struct {
 	receiveCh chan *genai.LiveServerMessage
 	sendCh    chan genai.LiveRealtimeInput

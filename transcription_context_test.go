@@ -54,3 +54,19 @@ func TestSanitizeTranscriptionKeyword(t *testing.T) {
 		t.Fatalf("sanitizeTranscriptionKeyword() = %q, want TalkXTyper", got)
 	}
 }
+
+func TestBuildTranscriptionKeywordsSeedsFirst(t *testing.T) {
+	got := buildTranscriptionKeywords([]string{"talkxtyper", "Leafo", "robotgo"}, "Editing robotgo key.go with TalkXTyper")
+	want := []string{"talkxtyper", "Leafo", "robotgo", "key.go"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("buildTranscriptionKeywords() = %q, want %q", got, want)
+	}
+}
+
+func TestParseKeywordList(t *testing.T) {
+	got := parseKeywordList("foo\n bar, Baz\n\nfoo\nbaz.")
+	want := []string{"foo", "bar", "Baz"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("parseKeywordList() = %q, want %q", got, want)
+	}
+}

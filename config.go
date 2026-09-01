@@ -43,6 +43,13 @@ type Config struct {
 	IncludeNvim           bool
 	IncludeTmux           bool
 	ListenAddress         string
+	// GeminiSmartMode asks Gemini transcription to remove filler words, false
+	// starts and repetitions and to apply light formatting, instead of
+	// transcribing verbatim.
+	GeminiSmartMode bool
+	// Keywords are always sent as transcription hints, ahead of any terms
+	// extracted from the collected context.
+	Keywords []string
 }
 
 var config = Config{

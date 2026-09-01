@@ -20,6 +20,7 @@ var indexPageTemplate = template.Must(template.New("index").Parse(`
 		<p>HTTP API:</p>
 		<ul>
 			<li><a href="/context">Context</a></li>
+			<li><a href="/keywords">Keywords</a></li>
 			<li><a href="/describe-screen">Describe Screen</a></li>
 			<li><a href="/nvim">nvim Remote</a></li>
 			<li><a href="/tmux">tmux Panes</a></li>
@@ -37,12 +38,32 @@ var contextPageTemplate = template.Must(template.New("context").Parse(`
 	</head>
 	<body>
 		<h1>Current Context</h1>
-		<p>Keywords extracted from this text are sent as hints with every transcription. Use a <code>Keywords:</code> heading with <code>- </code> list items to include terms verbatim.</p>
+		<p>Keywords extracted from this text are sent as hints with every transcription, after the <a href="/keywords">configured keywords</a>. Use a <code>Keywords:</code> heading with <code>- </code> list items to include terms verbatim.</p>
 		<pre>{{.}}</pre>
 		<form method="POST" action="/context">
 			<label for="context">Set Context:</label><br>
 			<textarea id="context" name="context" rows="4" cols="50"></textarea><br><br>
 			<input type="submit" value="Submit">
+		</form>
+	</body>
+	</html>
+`))
+
+var keywordsPageTemplate = template.Must(template.New("keywords").Parse(`
+	<!DOCTYPE html>
+	<html>
+	<head>
+		<title>Keywords</title>
+	</head>
+	<body>
+		<h1>Configured Keywords</h1>
+		<p>These terms are sent as transcription hints with every recording, ahead of anything extracted from the current context. Names, identifiers, and jargon you say often belong here. One per line. Saved to the config file.</p>
+		{{if .Saved}}<p><b>Saved {{len .Keywords}} keywords.</b></p>{{end}}
+		{{if .Error}}<pre><b>{{.Error}}</b></pre>{{end}}
+		<form method="POST" action="/keywords">
+			<textarea id="keywords" name="keywords" rows="20" cols="50">{{range .Keywords}}{{.}}
+{{end}}</textarea><br><br>
+			<input type="submit" value="Save">
 		</form>
 	</body>
 	</html>
@@ -330,6 +351,31 @@ func startServer() {
 			}
 		} else {
 			http.Error(w, "Unsupported method", http.StatusMethodNotAllowed)
+		}
+	}))
+
+	http.HandleFunc("/keywords", withCORS(func(w http.ResponseWriter, r *http.Request) {
+		page := map[string]any{"Keywords": config.Keywords}
+		switch r.Method {
+		case http.MethodPost:
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "Error parsing form", http.StatusBadRequest)
+				return
+			}
+			config.Keywords = parseKeywordList(r.FormValue("keywords"))
+			page["Keywords"] = config.Keywords
+			if err := writeConfig(); err != nil {
+				page["Error"] = err.Error()
+			} else {
+				page["Saved"] = true
+			}
+		case http.MethodGet:
+		default:
+			http.Error(w, "Unsupported method", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := keywordsPageTemplate.Execute(w, page); err != nil {
+			http.Error(w, "Error rendering template", http.StatusInternalServerError)
 		}
 	}))
 

@@ -42,7 +42,7 @@ func newConfiguredLiveTranscriptionSession(ctx context.Context, provider Transcr
 		if err != nil {
 			return nil, "", transcriptionContext, err
 		}
-		return session, geminiLiveTranscriptionModel, transcriptionContext, nil
+		return session, geminiModelLabel(geminiLiveTranscriptionModel), transcriptionContext, nil
 	case TranscriptionProviderOpenAI:
 		apiKey, err := getOpenAIAPIKey()
 		if err != nil {

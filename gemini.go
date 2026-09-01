@@ -62,8 +62,24 @@ func geminiAudioTranscriptionConfig(transcriptionContext TranscriptionContext) *
 	return &genai.AudioTranscriptionConfig{
 		LanguageCodes:    geminiLanguageCodes(transcriptionContext.Languages),
 		CustomVocabulary: transcriptionContext.Keywords,
-		Mode:             genai.AudioTranscriptionConfigModeVerbatim,
+		Mode:             geminiTranscriptionMode(),
 	}
+}
+
+func geminiTranscriptionMode() genai.AudioTranscriptionConfigMode {
+	if config.GeminiSmartMode {
+		return genai.AudioTranscriptionConfigModeSmart
+	}
+	return genai.AudioTranscriptionConfigModeVerbatim
+}
+
+// geminiModelLabel names the model in history, noting smart mode since it
+// changes the transcript noticeably.
+func geminiModelLabel(model string) string {
+	if config.GeminiSmartMode {
+		return model + " (smart)"
+	}
+	return model
 }
 
 func transcribeGeminiAudio(ctx context.Context, mp3FilePath string, transcriptionContext TranscriptionContext) (*TranscriptionResult, error) {
@@ -101,7 +117,7 @@ func transcribeGeminiAudio(ctx context.Context, mp3FilePath string, transcriptio
 	result.Original = text
 	result.TranscriptionProvider = TranscriptionProviderGemini
 	result.TranscriptionMode = TranscriptionModeBuffered
-	result.TranscriptionModel = geminiTranscriptionModel
+	result.TranscriptionModel = geminiModelLabel(geminiTranscriptionModel)
 	result.TranscriptionElapsed = transcribeElapsed
 	result.TranscriptionKeywords = transcriptionContext.Keywords
 	result.TranscriptionLanguages = transcriptionContext.Languages
