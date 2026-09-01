@@ -130,6 +130,9 @@ func recordAudioStream(parentCtx context.Context, stopCh <-chan struct{}, record
 	case <-stopCh:
 		stream.Stop()
 		log.Println("Recording finished.")
+		// The input stream is already stopped, so the microphone cannot pick
+		// the stop beep up.
+		playStopBeepAsync()
 	case <-ctx.Done():
 		stream.Stop()
 	}
@@ -197,26 +200,68 @@ func writeAudioRecordingToMP3(recording AudioRecording) (string, error) {
 // may briefly pick up the beep, but the user should only start speaking
 // after hearing it, so their speech is captured intact.
 func playReadyBeep() error {
+	return playTones([]toneSegment{{freq: 880, durationMs: 120}})
+}
+
+// playStopBeep plays a short descending tone to confirm that recording has
+// stopped and nothing more will be captured.
+func playStopBeep() error {
+	return playTones([]toneSegment{{freq: 660, durationMs: 80}, {freq: 440, durationMs: 100}})
+}
+
+// playStopBeepAsync plays the stop beep without blocking finalization. It
+// holds its own PortAudio reference because the recording stream's
+// initialization is released as soon as recordAudioStream returns.
+func playStopBeepAsync() {
+	go func() {
+		if err := portaudio.Initialize(); err != nil {
+			log.Printf("Failed to initialize PortAudio for stop beep: %v", err)
+			return
+		}
+		defer portaudio.Terminate()
+		if err := playStopBeep(); err != nil {
+			log.Printf("Failed to play stop beep: %v", err)
+		}
+	}()
+}
+
+type toneSegment struct {
+	freq       float64
+	durationMs int
+}
+
+// renderTones synthesizes the segments back to back as 16-bit mono PCM at the
+// recording sample rate, with a short fade at each segment edge to avoid
+// clicks.
+func renderTones(segments []toneSegment) []int16 {
+	const amplitude = 0.25
+	var samples []int16
+	for _, segment := range segments {
+		numSamples := sampleRate * segment.durationMs / 1000
+		fadeLen := numSamples / 8
+		for i := 0; i < numSamples; i++ {
+			envelope := 1.0
+			if i < fadeLen {
+				envelope = float64(i) / float64(fadeLen)
+			} else if i > numSamples-fadeLen {
+				envelope = float64(numSamples-i) / float64(fadeLen)
+			}
+			samples = append(samples, int16(math.Sin(2*math.Pi*segment.freq*float64(i)/float64(sampleRate))*amplitude*envelope*32767))
+		}
+	}
+	return samples
+}
+
+func playTones(segments []toneSegment) error {
 	outputDevice, err := findDeviceByName("pipewire")
 	if err != nil {
 		return fmt.Errorf("Error finding output device for beep: %v", err)
 	}
 
-	const beepFreq = 880.0
-	const beepDurationMs = 120
-	const beepAmplitude = 0.25
-
-	numSamples := sampleRate * beepDurationMs / 1000
-	samples := make([]int16, numSamples)
-	fadeLen := numSamples / 8
-	for i := 0; i < numSamples; i++ {
-		envelope := 1.0
-		if i < fadeLen {
-			envelope = float64(i) / float64(fadeLen)
-		} else if i > numSamples-fadeLen {
-			envelope = float64(numSamples-i) / float64(fadeLen)
-		}
-		samples[i] = int16(math.Sin(2*math.Pi*beepFreq*float64(i)/float64(sampleRate)) * beepAmplitude * envelope * 32767)
+	samples := renderTones(segments)
+	totalMs := 0
+	for _, segment := range segments {
+		totalMs += segment.durationMs
 	}
 
 	idx := 0
@@ -256,7 +301,7 @@ func playReadyBeep() error {
 
 	select {
 	case <-done:
-	case <-time.After(time.Duration(beepDurationMs+200) * time.Millisecond):
+	case <-time.After(time.Duration(totalMs+200) * time.Millisecond):
 	}
 	// Let the output buffer drain so the tail of the tone isn't clipped.
 	time.Sleep(40 * time.Millisecond)
