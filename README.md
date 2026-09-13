@@ -75,7 +75,7 @@ configuration directory. The file is named `talkxtyper-config.json`.
 
 ### Configuration Options
 
-- `OpenAIKey`: Your API key for the OpenAI API.
+- `OpenAIKey`: Your API key for the OpenAI API. The `OPENAI_API_KEY` environment variable takes precedence over this value when set.
 - `GeminiKey`: Your Gemini API key. `GEMINI_API_KEY` and `GOOGLE_API_KEY`
   environment variables take precedence over this value.
 - `TranscriptionProvider`: `"openai"` (the default) or `"gemini"`.
