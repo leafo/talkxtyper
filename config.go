@@ -50,6 +50,10 @@ type Config struct {
 	// Keywords are always sent as transcription hints, ahead of any terms
 	// extracted from the collected context.
 	Keywords []string
+	// RecordHotkey and AbortHotkey override the default global hotkeys, e.g.
+	// "F1" or "Ctrl+Shift+R". Empty uses the default.
+	RecordHotkey string `json:",omitempty"`
+	AbortHotkey  string `json:",omitempty"`
 }
 
 var config = Config{

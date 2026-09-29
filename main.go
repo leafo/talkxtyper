@@ -200,20 +200,20 @@ func onReady() {
 	systray.SetTooltip("Ready")
 
 	// Register hotkeys first so menu titles can reflect them.
-	toggleHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyB)
+	toggleHotkey, toggleLabel := registerHotkey("record", config.RecordHotkey, DefaultRecordHotkey)
 	recordHotkeyLabel := ""
-	if err := toggleHotkey.Register(); err != nil {
-		notifyError("Could not register the record hotkey (Alt+B)", err)
-	} else {
-		log.Println("Toggle recording: Alt+B")
-		recordHotkeyLabel = " (Alt+B)"
+	var toggleHotkeyCh <-chan hotkey.Event
+	if toggleHotkey != nil {
+		log.Println("Toggle recording: " + toggleLabel)
+		recordHotkeyLabel = " (" + toggleLabel + ")"
+		toggleHotkeyCh = toggleHotkey.Keydown()
 	}
 
-	abortHotkey := hotkey.New([]hotkey.Modifier{hotkey.Mod1}, hotkey.KeyC)
-	if err := abortHotkey.Register(); err != nil {
-		notifyError("Could not register the abort hotkey (Alt+C)", err)
-	} else {
-		log.Println("Abort recording: Alt+C")
+	abortHotkey, abortLabel := registerHotkey("abort", config.AbortHotkey, DefaultAbortHotkey)
+	var abortHotkeyCh <-chan hotkey.Event
+	if abortHotkey != nil {
+		log.Println("Abort recording: " + abortLabel)
+		abortHotkeyCh = abortHotkey.Keydown()
 	}
 
 	mRecord := systray.AddMenuItem("Record and Transcribe"+recordHotkeyLabel, "Start recording and transcribing")
@@ -305,10 +305,10 @@ func onReady() {
 					typeString(transcription.String())
 				}
 
-			case <-toggleHotkey.Keydown():
+			case <-toggleHotkeyCh:
 				taskManager.StartOrStopTask()
 
-			case <-abortHotkey.Keydown():
+			case <-abortHotkeyCh:
 				taskManager.Abort()
 
 			case <-mRecord.ClickedCh:

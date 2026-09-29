@@ -49,7 +49,8 @@ TalkXTyper registers the following global hotkeys:
   in flight. Aborting discards the result and types nothing.
 
 These actions are also available from the systray menu ("Record and Transcribe"
-and "Abort Recording").
+and "Abort Recording"). Both hotkeys can be changed with the `RecordHotkey` and
+`AbortHotkey` configuration options.
 
 The systray's **Transcription** submenu switches between four profiles:
 
@@ -91,6 +92,13 @@ configuration directory. The file is named `talkxtyper-config.json`.
   names, identifiers, and jargon you say often. They are sent ahead of any
   keywords extracted from the collected context. The web interface has a
   `/keywords` page for editing this list.
+- `RecordHotkey`, `AbortHotkey`: Override the default `Alt+B` and `Alt+C`
+  hotkeys. Written as zero or more modifiers (`Ctrl`, `Shift`, `Alt`, `Super`)
+  followed by a key, joined with `+`, case-insensitive: e.g. `"F1"`,
+  `"Ctrl+Shift+R"`. Keys can be letters, digits, `F1`-`F35`, or `Space`,
+  `Enter`, `Escape`, `Tab`, `Backspace`, `Delete`, `Insert`, `Home`, `End`,
+  `PageUp`, `PageDown`, arrow keys (`Left`, etc.), `Pause`, `ScrollLock`,
+  `Print`. Omit or leave empty to use the default.
 
 Screen description and the buffered context-repair pass still use OpenAI, even
 when Gemini is selected for transcription. An OpenAI key is therefore also
