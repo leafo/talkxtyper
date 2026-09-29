@@ -242,7 +242,10 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 			if t.ctx.Err() != nil {
 				return
 			}
-			typed = syncLiveTyping(typed, typerSession.liveText())
+			target := typerSession.liveText()
+			if syncLiveTyping(t.ctx, typed, target) == nil {
+				typed = target
+			}
 		}
 		for {
 			select {
@@ -328,7 +331,13 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 	correctedChars, _ := liveTypingPlan(typed, transcript)
 	if typed != transcript {
 		log.Printf("Reconciling typed live text with final transcript.\ntyped: %q\nfinal: %q", typed, transcript)
-		syncLiveTyping(typed, transcript)
+		if err := syncLiveTyping(t.ctx, typed, transcript); err != nil {
+			return err
+		}
+	}
+
+	if err := t.ctx.Err(); err != nil {
+		return err
 	}
 
 	result := NewTranscriptionResult()
@@ -432,17 +441,4 @@ func (t *TranscribeTask) complete(result *TranscriptionResult) {
 	}
 	t.SetResult(result)
 	taskManager.AppendToHistory(result)
-}
-
-// syncLiveTyping edits the on-screen text from typed to target with
-// backspaces and typing, returning the text now on screen.
-func syncLiveTyping(typed, target string) string {
-	backspaces, suffix := liveTypingPlan(typed, target)
-	if backspaces > 0 {
-		typeBackspaces(backspaces)
-	}
-	if suffix != "" {
-		typeString(suffix)
-	}
-	return target
 }

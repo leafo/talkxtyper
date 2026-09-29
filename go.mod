@@ -9,6 +9,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/google/uuid v1.6.0
 	github.com/gordonklaus/portaudio v0.0.0-20260203164431-765aa7dfa631
+	github.com/jezek/xgb v1.3.0
 	github.com/openai/openai-go/v3 v3.50.0
 	github.com/viert/go-lame v0.0.0-20201108052322-bb552596b11d
 	golang.design/x/hotkey v0.4.1
@@ -38,7 +39,6 @@ require (
 	github.com/google/s2a-go v0.1.8 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/jezek/xgb v1.3.0 // indirect
 	github.com/jezek/xgbutil v0.0.0-20260124183602-9fd151d6a51a // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/otiai10/gosseract/v2 v2.4.1 // indirect

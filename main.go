@@ -12,7 +12,6 @@ import (
 	"flag"
 
 	"github.com/getlantern/systray"
-	"github.com/go-vgo/robotgo"
 	"golang.design/x/hotkey"
 )
 
@@ -302,7 +301,7 @@ func onReady() {
 				// Live mode already typed the transcript as it streamed; the
 				// result here is only for history.
 				if transcription.TranscriptionMode != TranscriptionModeLive {
-					typeString(transcription.String())
+					typeString(context.Background(), transcription.String())
 				}
 
 			case <-toggleHotkeyCh:
@@ -384,6 +383,7 @@ func onReady() {
 
 			case <-mExit.ClickedCh:
 				systray.Quit()
+				return
 
 			}
 		}
@@ -408,28 +408,6 @@ func transcriptionProfileLabel(provider TranscriptionProvider, mode Transcriptio
 		providerLabel = "Gemini"
 	}
 	return providerLabel + " / " + transcriptionModeLabel(mode)
-}
-
-// typeCharDelayMillis is the extra pause robotgo adds after each typed
-// character. robotgo's X11 backend already holds every key down for 5 ms, so
-// this is set to zero for the fastest typing that still keeps events in order.
-const typeCharDelayMillis = 0
-
-func typeString(input string) error {
-	robotgo.TypeStr(input, 0, typeCharDelayMillis)
-	return nil
-}
-
-// typeBackspaces erases count characters. robotgo pauses KeySleep (10 ms by
-// default) after every tap, which makes live corrections visibly lag, so the
-// pause is shortened for the duration of the run.
-func typeBackspaces(count int) {
-	previousKeySleep := robotgo.KeySleep
-	robotgo.KeySleep = 1
-	defer func() { robotgo.KeySleep = previousKeySleep }()
-	for i := 0; i < count; i++ {
-		_ = robotgo.KeyTap("backspace")
-	}
 }
 
 func openHTTPInterface(addr string) error {
