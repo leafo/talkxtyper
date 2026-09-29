@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"sync"
 	"time"
 
-	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 )
 
@@ -17,27 +15,14 @@ const heldModifierMask = xproto.ModMaskShift | xproto.ModMaskControl | xproto.Mo
 
 const modifierReleasePoll = 10 * time.Millisecond
 
-var (
-	modifierConnOnce sync.Once
-	modifierConn     *xgb.Conn
-	modifierRoot     xproto.Window
-)
-
 func heldModifiers() (uint16, bool) {
-	modifierConnOnce.Do(func() {
-		conn, err := xgb.NewConn()
-		if err != nil {
-			log.Printf("Could not connect to X to check held modifiers: %v\n", err)
-			return
-		}
-		modifierConn = conn
-		modifierRoot = xproto.Setup(conn).DefaultScreen(conn).Root
-	})
-	if modifierConn == nil {
+	x, err := x11Connection()
+	if err != nil {
 		return 0, false
 	}
+	x.drainEvents()
 
-	reply, err := xproto.QueryPointer(modifierConn, modifierRoot).Reply()
+	reply, err := xproto.QueryPointer(x.conn, x.root).Reply()
 	if err != nil || reply == nil {
 		return 0, false
 	}

@@ -301,7 +301,9 @@ func onReady() {
 				// Live mode already typed the transcript as it streamed; the
 				// result here is only for history.
 				if transcription.TranscriptionMode != TranscriptionModeLive {
-					typeString(context.Background(), transcription.String())
+					if err := typeString(context.Background(), transcription.String()); err != nil {
+						log.Printf("Typing transcription failed: %v", err)
+					}
 				}
 
 			case <-toggleHotkeyCh:

@@ -243,9 +243,13 @@ func (t *TranscribeTask) runLive(stateCh chan<- TaskState) error {
 				return
 			}
 			target := typerSession.liveText()
-			if syncLiveTyping(t.ctx, typed, target) == nil {
-				typed = target
+			if err := syncLiveTyping(t.ctx, typed, target); err != nil {
+				if t.ctx.Err() == nil {
+					log.Printf("Live typing failed: %v", err)
+				}
+				return
 			}
+			typed = target
 		}
 		for {
 			select {
